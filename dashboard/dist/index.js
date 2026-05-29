@@ -9,15 +9,32 @@
   "use strict";
 
   const SDK = window.__HERMES_PLUGIN_SDK__;
-  const { React } = SDK;
+  if (!SDK || !window.__HERMES_PLUGINS__) return;
+
+  const React = SDK.React;
   const { useState, useEffect, useCallback } = SDK.hooks;
+  const C = SDK.components;
   const {
     Card, CardHeader, CardTitle, CardContent,
-    Badge, Button, Input, Label, Separator,
-  } = SDK.components;
+    Badge, Button, Input, Label,
+  } = C;
   const h = React.createElement;
 
-  const API = "/api/plugins/openrouter_custom";
+  const API_BASE = "/api/plugins/openrouter_custom";
+
+  async function api(path, options) {
+    const url = API_BASE + path;
+    const token = window.__HERMES_SESSION_TOKEN__ || "";
+    const headers = Object.assign({}, (options && options.headers) || {});
+    if (token) headers["X-Hermes-Session-Token"] = token;
+    const res = await fetch(url, Object.assign({}, options || {}, { headers: headers }));
+    if (!res.ok) {
+      const text = await res.text().catch(function () { return res.statusText; });
+      throw new Error(res.status + ": " + text);
+    }
+    const text = await res.text();
+    try { return JSON.parse(text); } catch (_) { return null; }
+  }
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -109,10 +126,7 @@
 
     const reload = useCallback(function () {
       setBusy(true);
-      Promise.all([
-        SDK.fetchJSON(API + "/config"),
-        SDK.fetchJSON(API + "/state"),
-      ])
+      Promise.all([api("/config"), api("/state")])
         .then(function (results) {
           setDefaults(results[0].defaults || {});
           setConfig(deepClone(results[0].config || {}));
@@ -145,7 +159,7 @@
 
     function save() {
       setBusy(true); setMsg(null); setErr(null);
-      SDK.fetchJSON(API + "/config", {
+      api("/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ config: config }),
@@ -157,7 +171,7 @@
 
     function refreshNow() {
       setBusy(true); setMsg(null); setErr(null);
-      SDK.fetchJSON(API + "/refresh", { method: "POST" })
+      api("/refresh", { method: "POST" })
         .then(function (st) {
           setState(st);
           setMsg("Refreshed — выбрано: " + (st.real_model_id || "(none)"));
@@ -388,8 +402,5 @@
     );
   }
 
-  SDK.registerPlugin({
-    name: "openrouter_custom",
-    component: OpenRouterCustomPage,
-  });
+  window.__HERMES_PLUGINS__.register("openrouter_custom", OpenRouterCustomPage);
 })();
