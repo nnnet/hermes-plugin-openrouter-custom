@@ -30,6 +30,42 @@ def fetch_live_catalog(api_key: str | None = None, timeout: float = 8.0) -> list
     return [m for m in data if isinstance(m, dict) and m.get("id")]
 
 
+_PARAMS_RX = re.compile(r"(\d+(?:\.\d+)?)\s*[Bb]\b")
+
+
+def _extract_params(item: dict) -> tuple[str, float]:
+    """Return ``(display_string, billions_float)`` for a model.
+
+    OpenRouter doesn't expose parameter count as a structured field, so
+    we sniff it out of ``description`` with a regex. A few model
+    families (laguna-xs, laguna-m, kimi) ship descriptions that omit
+    the count and need a hard-coded fallback — these mirror the same
+    overrides used in the operator's reference ``curl | jq`` pipeline.
+
+    The display string is human-friendly ("70B", "15B", "Not Specified");
+    the float is exposed as the ``params_desc`` ranking feature
+    (higher = bigger model preferred). "Not Specified" maps to 0.0 so
+    those candidates rank last when ``params_desc`` is selected.
+    """
+    mid = str(item.get("id") or "").lower()
+    if "laguna-xs" in mid:
+        return ("15B", 15.0)
+    if "laguna-m" in mid:
+        return ("40B", 40.0)
+    if "kimi" in mid:
+        return ("70B+", 70.0)
+    desc = str(item.get("description") or "")
+    m = _PARAMS_RX.search(desc)
+    if not m:
+        return ("Not Specified", 0.0)
+    raw = m.group(1)
+    try:
+        val = float(raw)
+    except ValueError:
+        return ("Not Specified", 0.0)
+    return (f"{raw}B", val)
+
+
 def _price_per_million(pricing: dict, key: str) -> float:
     """Return USD per 1 000 000 tokens for the given pricing field.
 
@@ -127,11 +163,13 @@ def rank(items: list[dict], ranking: dict, prefer_patterns: list[str]) -> list[d
         mid = str(item.get("id") or "")
         modality = str((item.get("architecture") or {}).get("modality") or "").lower()
         params = item.get("supported_parameters") or []
+        _, params_b = _extract_params(item)
         return {
             "prefer_match": sum(1 for rx in prefer_rxs if rx.search(mid)),
             "context_desc": int(item.get("context_length") or 0),
             "modality_pref": 2 if "image" in modality else 1,
             "tools_count": len(params) if isinstance(params, list) else 0,
+            "params_desc": params_b,
             "latency_p95": -1 * (item.get("_latency_p95") or 0),  # state-injected
         }
 
@@ -194,6 +232,8 @@ def pick_best(
                 "supports_tools": "tools" in (c.get("supported_parameters") or []),
                 "prompt_per_million_usd": _price_per_million(c.get("pricing") or {}, "prompt"),
                 "completion_per_million_usd": _price_per_million(c.get("pricing") or {}, "completion"),
+                "params_display": _extract_params(c)[0],
+                "params_billions": _extract_params(c)[1],
             }
             for c in top
         ],

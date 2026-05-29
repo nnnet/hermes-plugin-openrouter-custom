@@ -7,7 +7,7 @@ from pathlib import Path
 _root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_root))
 
-from selector import apply_filters, rank, pick_best  # noqa: E402
+from selector import apply_filters, rank, pick_best, _extract_params  # noqa: E402
 
 
 def _item(
@@ -162,6 +162,34 @@ def test_filter_exclude_pattern() -> None:
          "exclude_patterns": ["llama-3\\.2-3b"]},
     )
     assert [i["id"] for i in out] == ["qwen3:free"]
+
+
+def test_extract_params_from_description() -> None:
+    assert _extract_params({"id": "x:free", "description": "Llama 3.3 70B Instruct"}) == ("70B", 70.0)
+    assert _extract_params({"id": "x:free", "description": "Qwen3 235B base model"}) == ("235B", 235.0)
+    assert _extract_params({"id": "x:free", "description": "Trained 0.5B params"}) == ("0.5B", 0.5)
+
+
+def test_extract_params_hardcoded_overrides() -> None:
+    assert _extract_params({"id": "poolside/laguna-xs.2:free", "description": ""}) == ("15B", 15.0)
+    assert _extract_params({"id": "poolside/laguna-m.1:free", "description": ""}) == ("40B", 40.0)
+    assert _extract_params({"id": "moonshotai/kimi-k2.6:free", "description": ""}) == ("70B+", 70.0)
+
+
+def test_extract_params_missing_description() -> None:
+    assert _extract_params({"id": "x:free", "description": ""}) == ("Not Specified", 0.0)
+    assert _extract_params({"id": "x:free", "description": "Tools, structured output"}) == ("Not Specified", 0.0)
+    assert _extract_params({"id": "x:free"}) == ("Not Specified", 0.0)
+
+
+def test_rank_params_desc() -> None:
+    items = [
+        _item("small:free", 100000, ["tools"]) | {"description": "Mini 8B variant"},
+        _item("big:free", 100000, ["tools"]) | {"description": "Large 70B mixture-of-experts"},
+        _item("mid:free", 100000, ["tools"]) | {"description": "Balanced 32B model"},
+    ]
+    out = rank(items, {"rank_by": "params_desc", "tiebreakers": []}, [])
+    assert [i["id"] for i in out] == ["big:free", "mid:free", "small:free"]
 
 
 def test_rank_prefer_match() -> None:

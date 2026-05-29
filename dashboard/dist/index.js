@@ -102,6 +102,7 @@
       context_desc: Number(item.context_length) || 0,
       modality_pref: modality.indexOf("image") >= 0 ? 2 : 1,
       tools_count: item.supports_tools ? 1 : 0,
+      params_desc: Number(item.params_billions) || 0,
       latency_p95: -1 * (Number(item._latency_p95) || 0),
     };
   }
@@ -287,7 +288,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.4"),
+              h(Badge, { variant: "outline" }, "v0.4.5"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -409,7 +410,7 @@
             SelectRow({
               label: tx(t, "ranking.primary", "Primary key"),
               value: ranking.rank_by || "prefer_match",
-              options: ["prefer_match", "context_desc", "modality_pref", "tools_count", "latency_p95"],
+              options: ["prefer_match", "context_desc", "params_desc", "modality_pref", "tools_count", "latency_p95"],
               onChange: function (v) { patch(["ranking", "rank_by"], v); },
             }),
             h("div", { className: "col-span-2" },
@@ -418,7 +419,7 @@
                 value: lines(ranking.tiebreakers),
                 onChange: function (v) { patch(["ranking", "tiebreakers"], fromLines(v)); },
                 hint: tx(t, "ranking.tiebreakers_hint",
-                  "Allowed: prefer_match, context_desc, modality_pref, tools_count, latency_p95. " +
+                  "Allowed: prefer_match, context_desc, params_desc, modality_pref, tools_count, latency_p95. " +
                   "The primary key is auto-skipped if you list it here too."),
                 rows: 3,
               }),
@@ -463,6 +464,14 @@
                   tx(t, "ranking.legend.tools_count",
                     "Length of supported_parameters array (tools, response_format, …). " +
                     "More native features → higher. Loose proxy for \"feature-richer\" model.")),
+                h("div", null,
+                  h("span", { className: "font-courier text-emerald-500" }, "params_desc"),
+                  " — ",
+                  tx(t, "ranking.legend.params_desc",
+                    "Parameter count in billions, sniffed from the model description " +
+                    "(\"Llama 3.3 70B\" → 70). Bigger model → higher. Missing/unparseable " +
+                    "descriptions get 0 and rank last. The laguna and kimi families are " +
+                    "hardcoded since their descriptions omit the count.")),
                 h("div", null,
                   h("span", { className: "font-courier text-emerald-500" }, "latency_p95"),
                   " — ",
@@ -543,7 +552,7 @@
               "a hard failure to Hermes when every candidate refuses.")),
           NumberRow({
             label: tx(t, "internal_fallback.sequential_count",
-              "Sequential fallback depth (M)"),
+              "Sequential fallback depth"),
             value: internal.sequential_count,
             fallback: 1,
             onChange: function (v) {
@@ -596,6 +605,7 @@
               h("thead", null, h("tr", { className: "text-muted-foreground" },
                 h("th", { className: "text-left py-1" }, tx(t, "pool.rank", "#")),
                 h("th", { className: "text-left py-1" }, tx(t, "pool.model", "Model")),
+                h("th", { className: "text-right py-1" }, tx(t, "pool.params", "Params")),
                 h("th", { className: "text-right py-1" }, tx(t, "pool.context", "Context")),
                 h("th", { className: "text-right py-1" }, tx(t, "pool.tools", "Tools")),
                 h("th", { className: "text-right py-1" }, tx(t, "pool.modality", "Modality")),
@@ -610,6 +620,7 @@
                 },
                   h("td", { className: "py-1 text-muted-foreground" }, idx + 1),
                   h("td", { className: "py-1" }, (isPick ? "★ " : "  ") + c.id),
+                  h("td", { className: "py-1 text-right" }, c.params_display || "—"),
                   h("td", { className: "py-1 text-right" }, c.context_length),
                   h("td", { className: "py-1 text-right" }, c.supports_tools ? "✓" : "—"),
                   h("td", { className: "py-1 text-right" }, c.modality || "—"),
