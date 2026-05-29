@@ -1,0 +1,36 @@
+dashboard/dist/index.js
+  s_e5369d415d379b::t_b3dd6226c6ef60 422
+  s_e5369d415d379b::t_e2bd8dc482d190 555
+  s_e5369d415d379b::t_a8396483c1cf4f 608,623
+  s_e5369d415d379b::t_3255fe5e09154d 468-474
+  s_e5369d415d379b::t_ed2490463c1fe3 105
+  s_e5369d415d379b::t_6f3d732c0522bc 291
+  s_e5369d415d379b::t_2312c48411a2e8 413
+dashboard/manifest.json
+  s_e5369d415d379b::t_f6c7cb9bdbaa09 6
+selector.py
+  s_e5369d415d379b::t_1bc7e8d48596a3 33-68
+  s_e5369d415d379b::t_bbd84d18af938e 166,172
+  s_e5369d415d379b::t_51602f18ddec01 235-236
+plugin.yaml
+  s_e5369d415d379b::t_0c09bbc16b214a 3
+tests/test_selector.py
+  s_e5369d415d379b::t_2884f0b539d79c 10
+  s_e5369d415d379b::t_aad428d99b7f36 167-194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0edb0a7dc68b2f73a527dd15e2c6fff8d35d1004",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}
