@@ -81,6 +81,53 @@
       .filter(Boolean);
   }
 
+  // ── live re-rank — JS mirror of selector.py:rank() ──
+  // Operates on state.candidates_top entries (already filtered) so the
+  // table reflects the *current* form values, not whatever ranking was
+  // active at the last cron tick. Diverges from selector.py in one place:
+  // state only carries a boolean ``supports_tools`` (the original
+  // ``supported_parameters`` array is discarded on serialization), so
+  // ``tools_count`` collapses to 1 / 0 here.
+  function compileRegex(pattern) {
+    try { return new RegExp(pattern, "i"); }
+    catch (_) { return null; }
+  }
+  function features(item, preferRxs) {
+    const mid = String(item.id || "");
+    const modality = String(item.modality || "").toLowerCase();
+    return {
+      prefer_match: preferRxs.reduce(function (n, rx) {
+        return n + (rx && rx.test(mid) ? 1 : 0);
+      }, 0),
+      context_desc: Number(item.context_length) || 0,
+      modality_pref: modality.indexOf("image") >= 0 ? 2 : 1,
+      tools_count: item.supports_tools ? 1 : 0,
+      latency_p95: -1 * (Number(item._latency_p95) || 0),
+    };
+  }
+  function rankLive(items, rankingCfg, preferPatterns) {
+    if (!items || !items.length) return [];
+    const primary = (rankingCfg && rankingCfg.rank_by) || "prefer_match";
+    const tiebreakers = (rankingCfg && rankingCfg.tiebreakers) || [];
+    const orderedKeys = [primary].concat(
+      tiebreakers.filter(function (k) { return k !== primary; })
+    );
+    const preferRxs = (preferPatterns || []).map(compileRegex);
+    // Decorate with sort tuple, sort stable, undecorate.
+    const decorated = items.map(function (it, idx) {
+      const f = features(it, preferRxs);
+      const tuple = orderedKeys.map(function (k) { return -(f[k] || 0); });
+      return { it: it, tuple: tuple, idx: idx };
+    });
+    decorated.sort(function (a, b) {
+      for (let i = 0; i < a.tuple.length; i++) {
+        if (a.tuple[i] !== b.tuple[i]) return a.tuple[i] - b.tuple[i];
+      }
+      return a.idx - b.idx; // stable
+    });
+    return decorated.map(function (d) { return d.it; });
+  }
+
   function TextRow(props) {
     return h("div", { className: "flex flex-col gap-1" },
       h(Label, null, props.label),
@@ -239,7 +286,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.0"),
+              h(Badge, { variant: "outline" }, "v0.4.1"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -354,22 +401,88 @@
 
       h(Card, null,
         h(CardHeader, null, h(CardTitle, { className: "text-base" }, tx(t, "section.ranking", "Ranking"))),
-        h(CardContent, { className: "grid grid-cols-2 gap-4" },
-          SelectRow({
-            label: tx(t, "ranking.primary", "Primary key"),
-            value: ranking.rank_by || "prefer_match",
-            options: ["prefer_match", "context_desc", "modality_pref", "tools_count", "latency_p95"],
-            onChange: function (v) { patch(["ranking", "rank_by"], v); },
-          }),
-          h("div", { className: "col-span-2" },
-            TextAreaRow({
-              label: tx(t, "ranking.tiebreakers", "Tiebreakers (one per line, in order)"),
-              value: lines(ranking.tiebreakers),
-              onChange: function (v) { patch(["ranking", "tiebreakers"], fromLines(v)); },
-              hint: tx(t, "ranking.tiebreakers_hint",
-                "Allowed: prefer_match, context_desc, modality_pref, tools_count, latency_p95."),
-              rows: 3,
+        h(CardContent, { className: "flex flex-col gap-4" },
+          h("p", { className: "text-xs text-muted-foreground" },
+            tx(t, "ranking.intro",
+              "Each surviving candidate gets a score per key. Sort is " +
+              "\"higher is better\" — the candidate at the top of the list " +
+              "becomes the alias target. The PRIMARY key decides first; " +
+              "TIEBREAKERS are applied left-to-right only when the primary " +
+              "score is tied.")),
+          h("div", { className: "grid grid-cols-2 gap-4" },
+            SelectRow({
+              label: tx(t, "ranking.primary", "Primary key"),
+              value: ranking.rank_by || "prefer_match",
+              options: ["prefer_match", "context_desc", "modality_pref", "tools_count", "latency_p95"],
+              onChange: function (v) { patch(["ranking", "rank_by"], v); },
             }),
+            h("div", { className: "col-span-2" },
+              TextAreaRow({
+                label: tx(t, "ranking.tiebreakers", "Tiebreakers (one per line, in order)"),
+                value: lines(ranking.tiebreakers),
+                onChange: function (v) { patch(["ranking", "tiebreakers"], fromLines(v)); },
+                hint: tx(t, "ranking.tiebreakers_hint",
+                  "Allowed: prefer_match, context_desc, modality_pref, tools_count, latency_p95. " +
+                  "The primary key is auto-skipped if you list it here too."),
+                rows: 3,
+              }),
+            ),
+          ),
+          h("div", { className: "rounded border border-border/60 p-3 text-xs space-y-1" },
+            h("div", { className: "text-muted-foreground uppercase tracking-wider mb-1" },
+              tx(t, "ranking.legend.title", "What each key means")),
+            h("div", null,
+              h("span", { className: "font-courier text-emerald-500" }, "prefer_match"),
+              " — ",
+              tx(t, "ranking.legend.prefer_match",
+                "Count of PREFER_PATTERNS regexes matching the model id. " +
+                "More matches → higher. Useful to softly steer toward " +
+                "a model family (qwen3, llama-3.3, etc.) without hard-pinning.")),
+            h("div", null,
+              h("span", { className: "font-courier text-emerald-500" }, "context_desc"),
+              " — ",
+              tx(t, "ranking.legend.context_desc",
+                "Raw context_length (tokens). Larger → higher. " +
+                "Useful when long prompts/transcripts are expected.")),
+            h("div", null,
+              h("span", { className: "font-courier text-emerald-500" }, "modality_pref"),
+              " — ",
+              tx(t, "ranking.legend.modality_pref",
+                "text+image → 2; text → 1. Promotes multimodal models when " +
+                "your modality filter allows them.")),
+            h("div", null,
+              h("span", { className: "font-courier text-emerald-500" }, "tools_count"),
+              " — ",
+              tx(t, "ranking.legend.tools_count",
+                "Length of supported_parameters array (tools, response_format, …). " +
+                "More native features → higher. Loose proxy for \"feature-richer\" model.")),
+            h("div", null,
+              h("span", { className: "font-courier text-emerald-500" }, "latency_p95"),
+              " — ",
+              tx(t, "ranking.legend.latency_p95",
+                "Inverted p95 latency from runtime metrics. Currently 0 for all " +
+                "candidates — runtime metric injection is future work, so this " +
+                "key is a no-op until then.")),
+          ),
+          h("div", { className: "rounded border border-border/60 p-3 text-xs space-y-1" },
+            h("div", { className: "text-muted-foreground uppercase tracking-wider mb-1" },
+              tx(t, "ranking.example.title", "Worked example")),
+            h("p", null,
+              tx(t, "ranking.example.body",
+                "Primary = prefer_match; tiebreakers = [context_desc, modality_pref]. " +
+                "Three candidates pass the filter:")),
+            h("ul", { className: "list-disc list-inside text-muted-foreground" },
+              h("li", null, tx(t, "ranking.example.a",
+                "qwen3-coder:free  → prefer_match=1, context=262144, modality=text")),
+              h("li", null, tx(t, "ranking.example.b",
+                "qwen3-next:free   → prefer_match=1, context=131072, modality=text")),
+              h("li", null, tx(t, "ranking.example.c",
+                "zzz-aurora:free   → prefer_match=0, context=200000, modality=text")),
+            ),
+            h("p", null,
+              tx(t, "ranking.example.result",
+                "Order: qwen3-coder (1, 262144) ▸ qwen3-next (1, 131072) ▸ zzz-aurora (0). " +
+                "qwen3-coder wins on primary tie via larger context.")),
           ),
         ),
       ),
@@ -441,35 +554,63 @@
         ),
       ),
 
-      state && state.candidates_top && h(Card, null,
-        h(CardHeader, null, h(CardTitle, { className: "text-base" }, tx(t, "section.pool", "Current candidate pool"))),
-        h(CardContent, null,
-          h("table", { className: "w-full text-sm font-courier" },
-            h("thead", null, h("tr", { className: "text-muted-foreground" },
-              h("th", { className: "text-left py-1" }, tx(t, "pool.model", "Model")),
-              h("th", { className: "text-right py-1" }, tx(t, "pool.context", "Context")),
-              h("th", { className: "text-right py-1" }, tx(t, "pool.tools", "Tools")),
-              h("th", { className: "text-right py-1" }, tx(t, "pool.modality", "Modality")),
-              h("th", { className: "text-right py-1" }, tx(t, "pool.price_in", "$/M in")),
-              h("th", { className: "text-right py-1" }, tx(t, "pool.price_out", "$/M out")),
-            )),
-            h("tbody", null, state.candidates_top.map(function (c) {
-              const isPick = c.id === state.real_model_id;
-              return h("tr", {
-                key: c.id,
-                className: isPick ? "bg-emerald-500/10" : "",
-              },
-                h("td", { className: "py-1" }, (isPick ? "★ " : "  ") + c.id),
-                h("td", { className: "py-1 text-right" }, c.context_length),
-                h("td", { className: "py-1 text-right" }, c.supports_tools ? "✓" : "—"),
-                h("td", { className: "py-1 text-right" }, c.modality || "—"),
-                h("td", { className: "py-1 text-right" }, c.prompt_per_million_usd != null ? c.prompt_per_million_usd.toFixed(3) : "—"),
-                h("td", { className: "py-1 text-right" }, c.completion_per_million_usd != null ? c.completion_per_million_usd.toFixed(3) : "—"),
-              );
-            })),
+      state && state.candidates_top && (function () {
+        const liveRanked = rankLive(
+          state.candidates_top, ranking, filters.prefer_patterns || []
+        );
+        // Detect divergence from server-side order (last cron tick).
+        let diverged = false;
+        for (let i = 0; i < liveRanked.length; i++) {
+          if ((state.candidates_top[i] || {}).id !== liveRanked[i].id) {
+            diverged = true; break;
+          }
+        }
+        return h(Card, null,
+          h(CardHeader, null,
+            h("div", { className: "flex items-center justify-between gap-3" },
+              h(CardTitle, { className: "text-base" },
+                tx(t, "section.pool", "Current candidate pool")),
+              diverged && h(Badge, { variant: "outline" },
+                tx(t, "pool.live_rerank_badge", "live re-rank (unsaved)")),
+            ),
           ),
-        ),
-      ),
+          h(CardContent, { className: "flex flex-col gap-2" },
+            h("p", { className: "text-xs text-muted-foreground" },
+              tx(t, "pool.order_hint",
+                "Sorted client-side using the Ranking section above — " +
+                "changes update instantly. ★ marks the model currently " +
+                "behind the alias in state.json; it only moves when you " +
+                "press Save + Refresh now, so after editing Ranking the " +
+                "star may not be at the top of this list until then.")),
+            h("table", { className: "w-full text-sm font-courier" },
+              h("thead", null, h("tr", { className: "text-muted-foreground" },
+                h("th", { className: "text-left py-1" }, tx(t, "pool.rank", "#")),
+                h("th", { className: "text-left py-1" }, tx(t, "pool.model", "Model")),
+                h("th", { className: "text-right py-1" }, tx(t, "pool.context", "Context")),
+                h("th", { className: "text-right py-1" }, tx(t, "pool.tools", "Tools")),
+                h("th", { className: "text-right py-1" }, tx(t, "pool.modality", "Modality")),
+                h("th", { className: "text-right py-1" }, tx(t, "pool.price_in", "$/M in")),
+                h("th", { className: "text-right py-1" }, tx(t, "pool.price_out", "$/M out")),
+              )),
+              h("tbody", null, liveRanked.map(function (c, idx) {
+                const isPick = c.id === state.real_model_id;
+                return h("tr", {
+                  key: c.id,
+                  className: isPick ? "bg-emerald-500/10" : "",
+                },
+                  h("td", { className: "py-1 text-muted-foreground" }, idx + 1),
+                  h("td", { className: "py-1" }, (isPick ? "★ " : "  ") + c.id),
+                  h("td", { className: "py-1 text-right" }, c.context_length),
+                  h("td", { className: "py-1 text-right" }, c.supports_tools ? "✓" : "—"),
+                  h("td", { className: "py-1 text-right" }, c.modality || "—"),
+                  h("td", { className: "py-1 text-right" }, c.prompt_per_million_usd != null ? c.prompt_per_million_usd.toFixed(3) : "—"),
+                  h("td", { className: "py-1 text-right" }, c.completion_per_million_usd != null ? c.completion_per_million_usd.toFixed(3) : "—"),
+                );
+              })),
+            ),
+          ),
+        );
+      })(),
     );
   }
 
