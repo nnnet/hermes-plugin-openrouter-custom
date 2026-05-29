@@ -95,6 +95,7 @@
   function features(item, preferRxs) {
     const mid = String(item.id || "");
     const modality = String(item.modality || "").toLowerCase();
+    const paramsB = Number(item.params_billions) || 0;
     return {
       prefer_match: preferRxs.reduce(function (n, rx) {
         return n + (rx && rx.test(mid) ? 1 : 0);
@@ -102,7 +103,8 @@
       context_desc: Number(item.context_length) || 0,
       modality_pref: modality.indexOf("image") >= 0 ? 2 : 1,
       tools_count: item.supports_tools ? 1 : 0,
-      params_desc: Number(item.params_billions) || 0,
+      params_desc: paramsB,
+      params_asc: -paramsB,
       latency_p95: -1 * (Number(item._latency_p95) || 0),
     };
   }
@@ -288,7 +290,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.5"),
+              h(Badge, { variant: "outline" }, "v0.4.6"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -410,7 +412,7 @@
             SelectRow({
               label: tx(t, "ranking.primary", "Primary key"),
               value: ranking.rank_by || "prefer_match",
-              options: ["prefer_match", "context_desc", "params_desc", "modality_pref", "tools_count", "latency_p95"],
+              options: ["prefer_match", "context_desc", "params_desc", "params_asc", "modality_pref", "tools_count", "latency_p95"],
               onChange: function (v) { patch(["ranking", "rank_by"], v); },
             }),
             h("div", { className: "col-span-2" },
@@ -419,7 +421,7 @@
                 value: lines(ranking.tiebreakers),
                 onChange: function (v) { patch(["ranking", "tiebreakers"], fromLines(v)); },
                 hint: tx(t, "ranking.tiebreakers_hint",
-                  "Allowed: prefer_match, context_desc, params_desc, modality_pref, tools_count, latency_p95. " +
+                  "Allowed: prefer_match, context_desc, params_desc, params_asc, modality_pref, tools_count, latency_p95. " +
                   "The primary key is auto-skipped if you list it here too."),
                 rows: 3,
               }),
@@ -472,6 +474,13 @@
                     "(\"Llama 3.3 70B\" → 70). Bigger model → higher. Missing/unparseable " +
                     "descriptions get 0 and rank last. The laguna and kimi families are " +
                     "hardcoded since their descriptions omit the count.")),
+                h("div", null,
+                  h("span", { className: "font-courier text-emerald-500" }, "params_asc"),
+                  " — ",
+                  tx(t, "ranking.legend.params_asc",
+                    "Same source as params_desc but reversed — SMALLER model wins. " +
+                    "Useful as a tiebreaker when you want the cheapest/fastest free model " +
+                    "of equal preference instead of the largest one.")),
                 h("div", null,
                   h("span", { className: "font-courier text-emerald-500" }, "latency_p95"),
                   " — ",

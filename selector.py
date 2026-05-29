@@ -170,6 +170,9 @@ def rank(items: list[dict], ranking: dict, prefer_patterns: list[str]) -> list[d
             "modality_pref": 2 if "image" in modality else 1,
             "tools_count": len(params) if isinstance(params, list) else 0,
             "params_desc": params_b,
+            # Reverse: smaller models score higher. Negated so the
+            # outer ``-feats[k]`` flip still produces ascending order.
+            "params_asc": -params_b,
             "latency_p95": -1 * (item.get("_latency_p95") or 0),  # state-injected
         }
 
