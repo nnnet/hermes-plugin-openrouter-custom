@@ -46,7 +46,7 @@ config:
     exclude_patterns: []
     prefer_patterns: [qwen3, llama-3\.3, deepseek, kimi-k2]
   ranking:
-    rank_by: prefer_match
+    rank_by: params_desc
     tiebreakers: [context_desc, modality_pref, tools_count]
   refresh:
     cron_minutes: 30

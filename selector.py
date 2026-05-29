@@ -156,7 +156,7 @@ def rank(items: list[dict], ranking: dict, prefer_patterns: list[str]) -> list[d
     if not items:
         return []
     prefer_rxs = _compile_patterns(prefer_patterns)
-    primary = (ranking.get("rank_by") or "prefer_match").strip().lower()
+    primary = (ranking.get("rank_by") or "params_desc").strip().lower()
     tiebreakers = list(ranking.get("tiebreakers") or [])
 
     def feature(item: dict) -> dict:
@@ -243,7 +243,7 @@ def pick_best(
             }
             for c in top
         ],
-        "reason": f"ranked {len(ranked)} candidates by {ranking.get('rank_by', 'prefer_match')}",
+        "reason": f"ranked {len(ranked)} candidates by {ranking.get('rank_by', 'params_desc')}",
     }
 
 

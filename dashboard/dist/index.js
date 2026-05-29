@@ -110,7 +110,7 @@
   }
   function rankLive(items, rankingCfg, preferPatterns) {
     if (!items || !items.length) return [];
-    const primary = (rankingCfg && rankingCfg.rank_by) || "prefer_match";
+    const primary = (rankingCfg && rankingCfg.rank_by) || "params_desc";
     const tiebreakers = (rankingCfg && rankingCfg.tiebreakers) || [];
     const orderedKeys = [primary].concat(
       tiebreakers.filter(function (k) { return k !== primary; })
@@ -292,7 +292,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.7"),
+              h(Badge, { variant: "outline" }, "v0.4.8"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -413,7 +413,7 @@
           h("div", { className: "grid grid-cols-2 gap-4" },
             SelectRow({
               label: tx(t, "ranking.primary", "Primary key"),
-              value: ranking.rank_by || "prefer_match",
+              value: ranking.rank_by || "params_desc",
               options: [
                 { value: "prefer_match",  label: "prefer_match — matches prefer_patterns regex" },
                 { value: "context_desc",  label: "context_desc — larger context wins" },
