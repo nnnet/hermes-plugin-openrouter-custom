@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.4.2
+version: 0.4.3
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -31,11 +31,10 @@ config:
     modality: text               # text | text+image | any
     exclude_patterns:            # regex blacklist matched against model id
       - ^openrouter/auto$        # platform-routed wildcard, not a real free model
-    prefer_patterns:             # regex boost during ranking
-      - qwen3
-      - llama-3\.3
-      - deepseek
-      - kimi-k2
+    # regex boost during ranking — left empty by default so the operator
+    # starts from a neutral pool; the dashboard shows the historical
+    # defaults (qwen3, llama-3\.3, deepseek, kimi-k2) as a placeholder.
+    prefer_patterns: []
 
   # Ranking — first by primary, then tiebreakers in order.
   ranking:
@@ -49,7 +48,10 @@ config:
   refresh:
     cron_minutes: 30
     on_failure: keep_last        # keep_last | rotate | fallback_static
-    fallback_static_id: qwen/qwen3-coder:free
+    # Used only when ``on_failure: fallback_static`` is selected. Empty
+    # by default — operator pastes the real OR id (or rides the dashboard
+    # placeholder hint ``qwen/qwen3-coder:free``).
+    fallback_static_id: ""
 
   # Optional cap on number of candidates kept in state file.
   max_candidates: 10

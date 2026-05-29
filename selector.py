@@ -66,10 +66,21 @@ def apply_filters(items: list[dict], filters: dict) -> list[dict]:
     except (TypeError, ValueError):
         completion_max = 0.0
 
+    # When the operator declares a zero-budget filter (prompt_max == 0 AND
+    # completion_max == 0), also require the id to end in ``:free``.
+    # Background: OpenRouter reports platform wildcards like
+    # ``openrouter/auto`` with a literal "0" prompt/completion price even
+    # though that endpoint routes to (and bills at) whichever underlying
+    # paid model wins the auto-selection. Without this strictness, those
+    # wildcards leak into the candidate pool and surprise the operator
+    # with paid traffic on a free-tier alias. Set free_only or use the
+    # exclude_patterns escape hatch to override.
+    strict_free = prompt_max == 0.0 and completion_max == 0.0
+
     kept: list[dict] = []
     for item in items:
         mid = str(item.get("id") or "")
-        if free_only and not mid.endswith(":free"):
+        if (free_only or strict_free) and not mid.endswith(":free"):
             continue
         pricing = item.get("pricing") or {}
         prompt_per_m = _price_per_million(pricing, "prompt")

@@ -60,6 +60,44 @@ def test_filter_price_default_is_free() -> None:
     assert [i["id"] for i in out] == ["a:free"]
 
 
+def test_strict_free_excludes_zero_priced_non_free_wildcards() -> None:
+    """price 0/0 must also require the ``:free`` suffix.
+
+    OpenRouter reports ``openrouter/auto`` and similar platform wildcards
+    with a literal "0" prompt/completion price. Without strict_free
+    those leak into the free-tier alias and bill at underlying paid
+    model rates.
+    """
+    items = [
+        _item("qwen3-coder:free", 200000, ["tools"], prompt_per_token=0.0, completion_per_token=0.0),
+        _item("openrouter/auto", 2000000, ["tools"], prompt_per_token=0.0, completion_per_token=0.0),
+        _item("foo/bar:beta", 100000, ["tools"], prompt_per_token=0.0, completion_per_token=0.0),
+    ]
+    out = apply_filters(
+        items,
+        {"require_tools": True, "min_context": 0, "modality": "any",
+         "price": {"prompt_max": 0, "completion_max": 0}},
+    )
+    # Strict-free dropped the two non-:free zero-priced wildcards.
+    assert [i["id"] for i in out] == ["qwen3-coder:free"]
+
+
+def test_strict_free_disengages_at_nonzero_budget() -> None:
+    """When the operator allows any non-zero budget, the strict :free
+    rule must NOT engage — otherwise paid id pools would silently shed
+    every non-:free candidate that fits the budget."""
+    items = [
+        _item("qwen3-coder:free", 200000, ["tools"], prompt_per_token=0.0),
+        _item("foo/bar", 100000, ["tools"], prompt_per_token=0.3e-6),  # 0.3/M
+    ]
+    out = apply_filters(
+        items,
+        {"require_tools": True, "min_context": 0, "modality": "any",
+         "price": {"prompt_max": 1.0, "completion_max": 1.0}},
+    )
+    assert sorted(i["id"] for i in out) == ["foo/bar", "qwen3-coder:free"]
+
+
 def test_filter_price_budget_accepts_paid() -> None:
     items = [
         _item("a:free", 100000, ["tools"], prompt_per_token=0.0),
