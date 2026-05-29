@@ -1,0 +1,49 @@
+name: openrouter_custom
+kind: model-provider
+version: 0.1.0
+description: |
+  OpenRouter live-catalog filter with stable pseudo-model alias.
+  Periodically fetches /api/v1/models, filters by free/context/tools/modality,
+  ranks candidates and masks the current best under a fixed user-defined name.
+author: nnnet/AiManager
+repo: https://github.com/nnnet/hermes-plugin-openrouter-custom
+
+# User-tunable parameters. Web UI / operator may rewrite this file in place
+# at runtime — the refresh script and on_session_start hook re-read it on
+# every invocation, so changes apply at the next cron tick / next session
+# without restart.
+config:
+  # Stable pseudo-name shown in /model picker. The on_session_start hook
+  # substitutes this with the currently-chosen real OR model id at session
+  # boundaries.
+  pseudo_model_alias: or-best-free
+
+  # Filters — model must pass all of these to enter the candidate pool.
+  filters:
+    free_only: true              # only :free models
+    min_context: 65536           # context_length must be >= this
+    require_tools: true          # supported_parameters must contain "tools"
+    modality: text               # text | text+image | any
+    exclude_patterns: []         # regex blacklist matched against model id
+    prefer_patterns:             # regex boost during ranking
+      - qwen3
+      - llama-3\.3
+      - deepseek
+      - kimi-k2
+
+  # Ranking — first by primary, then tiebreakers in order.
+  ranking:
+    rank_by: prefer_match        # prefer_match | context_desc | latency_p95
+    tiebreakers:                 # applied in order after primary
+      - context_desc             # larger context first
+      - modality_pref            # text+image > text
+      - tools_count              # more supported_parameters first
+
+  # Refresh schedule for the cron job that picks the best candidate.
+  refresh:
+    cron_minutes: 30
+    on_failure: keep_last        # keep_last | rotate | fallback_static
+    fallback_static_id: qwen/qwen3-coder:free
+
+  # Optional cap on number of candidates kept in state file.
+  max_candidates: 10

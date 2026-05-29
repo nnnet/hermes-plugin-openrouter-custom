@@ -1,0 +1,129 @@
+# openrouter_custom — Hermes plugin
+
+OpenRouter live-catalog filter with a **stable pseudo-model alias**.
+
+## What it does
+
+OpenRouter's `:free` tier rotates rapidly — new models appear, old ones get
+deprecated, daily rate-limits flap. Pinning a single `:free` id in
+`config.yaml` means staleness; whitelisting everything floods the `/model`
+picker with hundreds of entries.
+
+This plugin gives the operator **one stable handle** — e.g. `or-best-free` —
+that always points at "the best currently-available OR `:free` model that
+satisfies my hard constraints". A cron job re-evaluates the catalog every
+30 minutes (configurable). The session bootstraps with the current best.
+
+## Quick start
+
+```bash
+# /model <pseudo-alias> --provider openrouter_custom --global
+/model or-best-free --provider openrouter_custom --global
+```
+
+All subsequent sessions on the chosen platform/profile transparently use
+whichever real OR id the cron last picked.
+
+## Configuration
+
+Lives in `plugin.yaml`, hot-reloaded on every cron tick and every session
+start — no gateway restart required:
+
+```yaml
+config:
+  pseudo_model_alias: or-best-free
+  filters:
+    free_only: true
+    min_context: 65536
+    require_tools: true
+    modality: text
+    exclude_patterns: []
+    prefer_patterns: [qwen3, llama-3\.3, deepseek, kimi-k2]
+  ranking:
+    rank_by: prefer_match
+    tiebreakers: [context_desc, modality_pref, tools_count]
+  refresh:
+    cron_minutes: 30
+    on_failure: keep_last        # keep_last | rotate | fallback_static
+    fallback_static_id: qwen/qwen3-coder:free
+  max_candidates: 10
+```
+
+### Filter semantics
+
+| Field             | Behaviour                                                                  |
+|-------------------|----------------------------------------------------------------------------|
+| `free_only`       | Model `id` must end with `:free`.                                          |
+| `min_context`     | Model `context_length` must be `>=` this number (tokens).                  |
+| `require_tools`   | `supported_parameters` must contain `"tools"`.                             |
+| `modality`        | `text`, `text+image`, or `any`. Substring match against `architecture.modality`. |
+| `exclude_patterns`| Python regex blacklist on `id`. First match drops the model.               |
+| `prefer_patterns` | Python regex used for ranking boost. More matches = higher score.          |
+
+### Ranking semantics
+
+Primary key (`rank_by`) computed per candidate, then tiebreakers applied
+left-to-right. All keys are "higher is better".
+
+| Key             | Feature                                                                  |
+|-----------------|--------------------------------------------------------------------------|
+| `prefer_match`  | Number of `prefer_patterns` regexes that match the id.                   |
+| `context_desc`  | `context_length`.                                                        |
+| `modality_pref` | `text+image` → 2, `text` → 1.                                            |
+| `tools_count`   | Length of `supported_parameters`.                                        |
+| `latency_p95`   | Inverted p95 latency injected from runtime metrics (future work).        |
+
+## State file
+
+Written to `$HERMES_HOME/plugins/openrouter_custom/state.json` by the
+cron job:
+
+```json
+{
+  "last_refresh_iso": "2026-05-29T18:00:00Z",
+  "pseudo_alias": "or-best-free",
+  "real_model_id": "qwen/qwen3-coder:free",
+  "candidate_count": 6,
+  "candidates_top": [
+    {"id": "qwen/qwen3-coder:free", "context_length": 262144, "modality": "text", "supports_tools": true}
+  ],
+  "reason": "ranked 6 candidates by prefer_match"
+}
+```
+
+## How it plugs in
+
+* `__init__.py` registers `provider: openrouter_custom` in Hermes' provider
+  registry, with `fetch_models()` returning **only** the pseudo alias —
+  picker always shows one stable entry.
+* On every new session, the `on_session_start` hook checks if the current
+  agent is configured for `openrouter_custom` + the pseudo alias; if yes,
+  swaps `agent.model` to `state.real_model_id` before any LLM call goes
+  out.
+* `refresh.py` is the cron entry point — Hermes' cron system runs it every
+  N minutes (created automatically at install time by the bootstrap
+  script in the parent repo).
+
+## Failure modes
+
+* **Catalog fetch fails** → behaviour per `refresh.on_failure`:
+  * `keep_last` (default) — leaves state.json untouched.
+  * `rotate` — promotes the next-ranked candidate from the previous run.
+  * `fallback_static` — pins `fallback_static_id`.
+* **No candidates pass filters** → same strategies.
+* **State file missing when session starts** → plugin warns, session
+  proceeds with the pseudo alias as the model name (OpenRouter rejects
+  it). Operators should run `refresh.py` once after install before the
+  first session.
+
+## Running tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+All selector logic is pure-function. Network is stubbed in fixtures.
+
+## License
+
+MIT (see LICENSE).
