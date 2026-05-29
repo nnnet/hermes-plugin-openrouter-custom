@@ -30,16 +30,19 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-# Plugin package lives one level up (dashboard/ is a subdir of the plugin
-# directory).  Add the parent to sys.path so we can import the public
-# helpers (load_config, save_overrides, state_file, …) without forcing
-# the plugin to be a proper Python package.
-_plugin_root = Path(__file__).resolve().parent.parent
-if str(_plugin_root) not in sys.path:
-    sys.path.insert(0, str(_plugin_root))
+# Plugin package directory layout:
+#   /opt/data/plugins/openrouter_custom/           ← the package
+#       __init__.py                                ← module body
+#       selector.py
+#       dashboard/                                 ← this directory
+#           plugin_api.py                          ← __file__
+#
+# To ``import openrouter_custom`` we need the parent of the package dir
+# (``/opt/data/plugins``) on sys.path, not the package dir itself.
+_pkg_parent = Path(__file__).resolve().parent.parent.parent
+if str(_pkg_parent) not in sys.path:
+    sys.path.insert(0, str(_pkg_parent))
 
-# ``openrouter_custom`` here resolves to the plugin's __init__.py
-# (sibling of this dashboard/ subdir).
 import openrouter_custom as _pkg  # noqa: E402  — sys.path tweak above
 from openrouter_custom.selector import pick_best  # noqa: E402
 
