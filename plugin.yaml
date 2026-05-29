@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.2.0
+version: 0.2.1
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,

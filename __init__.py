@@ -110,6 +110,30 @@ if ProviderProfile is not None:
     class OpenRouterCustomProfile(ProviderProfile):  # type: ignore[misc]
         """OpenRouter aggregator behind a single pseudo-model handle."""
 
+        def resolve_runtime_model(self, model: str, **_context: object) -> str:  # type: ignore[override]
+            """Swap the pseudo alias for the current real id from state.json.
+
+            Called by conversation_loop on every new session. When the
+            agent's pinned model is the pseudo alias, look up the
+            cron-refreshed best candidate and substitute.  When the
+            operator pinned a specific real id from the picker pool,
+            we return it unchanged.
+            """
+            cfg = load_config()
+            alias = (cfg.get("pseudo_model_alias") or "best-free").strip()
+            if model != alias:
+                return model
+            state = load_state()
+            real = (state.get("real_model_id") or "").strip()
+            if not real:
+                logger.warning(
+                    "openrouter_custom: alias %r requested but state.json has no real_model_id — "
+                    "the request will hit OpenRouter with the alias and fail. Run refresh.py.",
+                    alias,
+                )
+                return model
+            return real
+
         def fetch_models(  # type: ignore[override]
             self,
             *,
@@ -168,54 +192,15 @@ if ProviderProfile is not None:
         )
 
 
-# ── on_session_start hook ──────────────────────────────────────────────────
-
-def _on_session_start(agent: Any = None, **_kwargs: Any) -> None:
-    """If agent points at openrouter_custom + pseudo alias, swap to real id.
-
-    Called by Hermes plugin manager for every new session.  No-op when the
-    state file is missing or the cron has not yet picked a model.
-    """
-    if agent is None:
-        return
-    provider = (getattr(agent, "provider", "") or "").strip().lower()
-    if provider != "openrouter_custom":
-        return
-    cfg = load_config()
-    alias = (cfg.get("pseudo_model_alias") or "best-free").strip()
-    current_model = (getattr(agent, "model", "") or "").strip()
-    if current_model != alias:
-        # User pinned a specific real id from the picker pool — leave it.
-        return
-    state = load_state()
-    real_id = (state.get("real_model_id") or "").strip()
-    if not real_id:
-        logger.warning(
-            "openrouter_custom: pseudo alias %r in use but state has no real_model_id; "
-            "session will hit OpenRouter with the alias and likely fail. "
-            "Run scripts/refresh.py to populate state.",
-            alias,
-        )
-        return
-    agent.model = real_id
-    # Stamp the pseudo on the agent so any UI that wants to display the
-    # logical name (instead of the real rotating id) can read this back.
-    setattr(agent, "_openrouter_custom_pseudo", alias)
-    logger.info(
-        "openrouter_custom: session %s — pseudo %r → real %r",
-        getattr(agent, "session_id", "?"),
-        alias,
-        real_id,
-    )
-
-
-# Plugin manager auto-discovers ``register(ctx)`` for hook-style plugins; for
-# model-provider plugins it auto-runs the module body.  We register the hook
-# via the module-scope helper Hermes plugin manager exposes when available.
+# ── Plugin entry point ─────────────────────────────────────────────────────
 
 def register(ctx: Any) -> None:  # pragma: no cover — exercised by Hermes
-    """Hermes plugin entry point — registers the session-start hook."""
-    try:
-        ctx.register_hook("on_session_start", _on_session_start)
-    except Exception as exc:
-        logger.warning("openrouter_custom: failed to register hook: %s", exc)
+    """Hermes plugin entry point.
+
+    All routing logic lives on the ProviderProfile subclass declared
+    above (see ``resolve_runtime_model`` and ``fetch_models``).  The
+    module body already calls ``register_provider`` at import time, so
+    this function is intentionally a no-op — it exists only because the
+    Hermes plugin manager requires every plugin to expose ``register``.
+    """
+    return None
