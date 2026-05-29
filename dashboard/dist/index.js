@@ -286,7 +286,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.1"),
+              h(Badge, { variant: "outline" }, "v0.4.2"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -402,13 +402,6 @@
       h(Card, null,
         h(CardHeader, null, h(CardTitle, { className: "text-base" }, tx(t, "section.ranking", "Ranking"))),
         h(CardContent, { className: "flex flex-col gap-4" },
-          h("p", { className: "text-xs text-muted-foreground" },
-            tx(t, "ranking.intro",
-              "Each surviving candidate gets a score per key. Sort is " +
-              "\"higher is better\" — the candidate at the top of the list " +
-              "becomes the alias target. The PRIMARY key decides first; " +
-              "TIEBREAKERS are applied left-to-right only when the primary " +
-              "score is tied.")),
           h("div", { className: "grid grid-cols-2 gap-4" },
             SelectRow({
               label: tx(t, "ranking.primary", "Primary key"),
@@ -428,61 +421,74 @@
               }),
             ),
           ),
-          h("div", { className: "rounded border border-border/60 p-3 text-xs space-y-1" },
-            h("div", { className: "text-muted-foreground uppercase tracking-wider mb-1" },
-              tx(t, "ranking.legend.title", "What each key means")),
-            h("div", null,
-              h("span", { className: "font-courier text-emerald-500" }, "prefer_match"),
-              " — ",
-              tx(t, "ranking.legend.prefer_match",
-                "Count of PREFER_PATTERNS regexes matching the model id. " +
-                "More matches → higher. Useful to softly steer toward " +
-                "a model family (qwen3, llama-3.3, etc.) without hard-pinning.")),
-            h("div", null,
-              h("span", { className: "font-courier text-emerald-500" }, "context_desc"),
-              " — ",
-              tx(t, "ranking.legend.context_desc",
-                "Raw context_length (tokens). Larger → higher. " +
-                "Useful when long prompts/transcripts are expected.")),
-            h("div", null,
-              h("span", { className: "font-courier text-emerald-500" }, "modality_pref"),
-              " — ",
-              tx(t, "ranking.legend.modality_pref",
-                "text+image → 2; text → 1. Promotes multimodal models when " +
-                "your modality filter allows them.")),
-            h("div", null,
-              h("span", { className: "font-courier text-emerald-500" }, "tools_count"),
-              " — ",
-              tx(t, "ranking.legend.tools_count",
-                "Length of supported_parameters array (tools, response_format, …). " +
-                "More native features → higher. Loose proxy for \"feature-richer\" model.")),
-            h("div", null,
-              h("span", { className: "font-courier text-emerald-500" }, "latency_p95"),
-              " — ",
-              tx(t, "ranking.legend.latency_p95",
-                "Inverted p95 latency from runtime metrics. Currently 0 for all " +
-                "candidates — runtime metric injection is future work, so this " +
-                "key is a no-op until then.")),
-          ),
-          h("div", { className: "rounded border border-border/60 p-3 text-xs space-y-1" },
-            h("div", { className: "text-muted-foreground uppercase tracking-wider mb-1" },
-              tx(t, "ranking.example.title", "Worked example")),
-            h("p", null,
-              tx(t, "ranking.example.body",
-                "Primary = prefer_match; tiebreakers = [context_desc, modality_pref]. " +
-                "Three candidates pass the filter:")),
-            h("ul", { className: "list-disc list-inside text-muted-foreground" },
-              h("li", null, tx(t, "ranking.example.a",
-                "qwen3-coder:free  → prefer_match=1, context=262144, modality=text")),
-              h("li", null, tx(t, "ranking.example.b",
-                "qwen3-next:free   → prefer_match=1, context=131072, modality=text")),
-              h("li", null, tx(t, "ranking.example.c",
-                "zzz-aurora:free   → prefer_match=0, context=200000, modality=text")),
+          h("details", { className: "rounded border border-border/60 px-3 py-2 text-xs" },
+            h("summary", { className: "cursor-pointer text-muted-foreground select-none" },
+              tx(t, "ranking.help.summary", "How does ranking work? (key meanings + example)")),
+            h("div", { className: "mt-2 space-y-3" },
+              h("p", null,
+                tx(t, "ranking.intro",
+                  "Each surviving candidate gets a score per key. Sort is " +
+                  "\"higher is better\" — the candidate at the top of the list " +
+                  "becomes the alias target. The PRIMARY key decides first; " +
+                  "TIEBREAKERS are applied left-to-right only when the primary " +
+                  "score is tied.")),
+              h("div", { className: "space-y-1" },
+                h("div", { className: "uppercase tracking-wider text-muted-foreground" },
+                  tx(t, "ranking.legend.title", "What each key means")),
+                h("div", null,
+                  h("span", { className: "font-courier text-emerald-500" }, "prefer_match"),
+                  " — ",
+                  tx(t, "ranking.legend.prefer_match",
+                    "Count of PREFER_PATTERNS regexes matching the model id. " +
+                    "More matches → higher. Useful to softly steer toward " +
+                    "a model family (qwen3, llama-3.3, etc.) without hard-pinning.")),
+                h("div", null,
+                  h("span", { className: "font-courier text-emerald-500" }, "context_desc"),
+                  " — ",
+                  tx(t, "ranking.legend.context_desc",
+                    "Raw context_length (tokens). Larger → higher. " +
+                    "Useful when long prompts/transcripts are expected.")),
+                h("div", null,
+                  h("span", { className: "font-courier text-emerald-500" }, "modality_pref"),
+                  " — ",
+                  tx(t, "ranking.legend.modality_pref",
+                    "text+image → 2; text → 1. Promotes multimodal models when " +
+                    "your modality filter allows them.")),
+                h("div", null,
+                  h("span", { className: "font-courier text-emerald-500" }, "tools_count"),
+                  " — ",
+                  tx(t, "ranking.legend.tools_count",
+                    "Length of supported_parameters array (tools, response_format, …). " +
+                    "More native features → higher. Loose proxy for \"feature-richer\" model.")),
+                h("div", null,
+                  h("span", { className: "font-courier text-emerald-500" }, "latency_p95"),
+                  " — ",
+                  tx(t, "ranking.legend.latency_p95",
+                    "Inverted p95 latency from runtime metrics. Currently 0 for all " +
+                    "candidates — runtime metric injection is future work, so this " +
+                    "key is a no-op until then.")),
+              ),
+              h("div", { className: "space-y-1" },
+                h("div", { className: "uppercase tracking-wider text-muted-foreground" },
+                  tx(t, "ranking.example.title", "Worked example")),
+                h("p", null,
+                  tx(t, "ranking.example.body",
+                    "Primary = prefer_match; tiebreakers = [context_desc, modality_pref]. " +
+                    "Three candidates pass the filter:")),
+                h("ul", { className: "list-disc list-inside text-muted-foreground" },
+                  h("li", null, tx(t, "ranking.example.a",
+                    "qwen3-coder:free  → prefer_match=1, context=262144, modality=text")),
+                  h("li", null, tx(t, "ranking.example.b",
+                    "qwen3-next:free   → prefer_match=1, context=131072, modality=text")),
+                  h("li", null, tx(t, "ranking.example.c",
+                    "zzz-aurora:free   → prefer_match=0, context=200000, modality=text")),
+                ),
+                h("p", null,
+                  tx(t, "ranking.example.result",
+                    "Order: qwen3-coder (1, 262144) ▸ qwen3-next (1, 131072) ▸ zzz-aurora (0). " +
+                    "qwen3-coder wins on primary tie via larger context.")),
+              ),
             ),
-            h("p", null,
-              tx(t, "ranking.example.result",
-                "Order: qwen3-coder (1, 262144) ▸ qwen3-next (1, 131072) ▸ zzz-aurora (0). " +
-                "qwen3-coder wins on primary tie via larger context.")),
           ),
         ),
       ),
