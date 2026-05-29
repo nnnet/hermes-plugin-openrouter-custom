@@ -20,7 +20,7 @@
   } = C;
   const h = React.createElement;
 
-  const API_BASE = "/api/plugins/model-providers/openrouter_custom";
+  const API_BASE = "/api/plugins/openrouter_custom";
 
   async function api(path, options) {
     const url = API_BASE + path;
@@ -402,5 +402,5 @@
     );
   }
 
-  window.__HERMES_PLUGINS__.register("model-providers/openrouter_custom", OpenRouterCustomPage);
+  window.__HERMES_PLUGINS__.register("openrouter_custom", OpenRouterCustomPage);
 })();

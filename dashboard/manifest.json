@@ -1,9 +1,9 @@
 {
-  "name": "model-providers/openrouter_custom",
+  "name": "openrouter_custom",
   "label": "OpenRouter Custom",
   "description": "Tune the filter, ranking and refresh parameters used to pick the live :free model behind the stable pseudo-alias.",
   "icon": "Sliders",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "tab": {
     "path": "/openrouter-custom",
     "position": "before:plugins"
