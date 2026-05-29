@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.4.8
+version: 0.4.9
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -38,9 +38,10 @@ config:
 
   # Ranking — first by primary, then tiebreakers in order.
   ranking:
-    rank_by: params_desc         # larger model wins (more B) by default
+    rank_by: prefer_match        # matches prefer_patterns regex first
     tiebreakers:                 # applied in order after primary
       - context_desc             # larger context first
+      - params_desc              # larger model wins (more B)
       - modality_pref            # text+image > text
       - tools_count              # more supported_parameters first
 
