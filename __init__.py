@@ -43,9 +43,16 @@ CONFIG_FILE = PLUGIN_DIR / "plugin.yaml"
 
 
 def _state_dir() -> Path:
-    """Resolve state directory inside HERMES_HOME (defaults to /opt/data)."""
+    """Resolve mutable state directory inside HERMES_HOME (defaults to /opt/data).
+
+    Lives under ``state/`` (not ``plugins/``) so the dashboard plugin
+    scanner — which walks ``HERMES_HOME/plugins/<child>/dashboard/`` —
+    does not collide with our state.json. The plugin's own files are
+    symlinked under ``plugins/openrouter_custom`` by the host-side
+    sync-external-plugins.sh; this state path stays isolated.
+    """
     base = os.environ.get("HERMES_HOME", "/opt/data")
-    return Path(base) / "plugins" / "openrouter_custom"
+    return Path(base) / "state" / "openrouter_custom"
 
 
 def state_file() -> Path:
