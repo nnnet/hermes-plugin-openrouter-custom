@@ -52,27 +52,89 @@ def state_file() -> Path:
     return _state_dir() / "state.json"
 
 
-def load_config() -> dict:
-    """Re-read plugin.yaml on every call so live edits apply at next tick.
+def overrides_file() -> Path:
+    """Mutable config overrides file written by the dashboard plugin UI.
 
-    Returns the ``config:`` section verbatim. Missing keys are filled by
-    the consumers (selector module honours defaults internally).
+    Lives in HERMES_HOME (rw) because the plugin source directory is
+    bind-mounted read-only inside the container. Anything written here is
+    merged on top of the bundled ``plugin.yaml`` ``config:`` block on
+    every load_config() call.
+    """
+    return _state_dir() / "config_overrides.yaml"
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """Recursively merge ``overlay`` into a shallow copy of ``base``.
+
+    Dict-valued keys merge; scalars / lists overwrite. Used to layer the
+    dashboard-edited overrides on top of the bundled defaults.
+    """
+    if not isinstance(overlay, dict):
+        return base
+    out = dict(base)
+    for k, v in overlay.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load_config() -> dict:
+    """Read defaults from plugin.yaml, merge mutable overrides on top.
+
+    Called fresh on every cron tick and every session start so changes
+    written via the dashboard UI (or directly to the overrides file)
+    apply at the next tick without a gateway restart.
     """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:  # pragma: no cover — Hermes always has pyyaml
         logger.warning("openrouter_custom: PyYAML missing, using empty config")
         return {}
+
+    defaults: dict = {}
     try:
         with open(CONFIG_FILE) as f:
             raw = yaml.safe_load(f) or {}
+        defaults = raw.get("config") or {}
     except FileNotFoundError:
         logger.warning("openrouter_custom: plugin.yaml not found at %s", CONFIG_FILE)
-        return {}
     except Exception as exc:
         logger.warning("openrouter_custom: failed to parse plugin.yaml: %s", exc)
-        return {}
-    return raw.get("config") or {}
+
+    overrides: dict = {}
+    overlay_path = overrides_file()
+    if overlay_path.exists():
+        try:
+            with open(overlay_path) as f:
+                overrides = yaml.safe_load(f) or {}
+        except Exception as exc:
+            logger.warning(
+                "openrouter_custom: failed to parse overrides at %s: %s",
+                overlay_path, exc,
+            )
+
+    return _deep_merge(defaults, overrides)
+
+
+def save_overrides(new_config: dict) -> None:
+    """Persist UI-edited config to the mutable overrides file.
+
+    Only the keys present in ``new_config`` are written — load_config()
+    will merge them on top of the bundled defaults at next read.
+    """
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("PyYAML required to save overrides") from exc
+
+    target = overrides_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".yaml.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.safe_dump(new_config, f, sort_keys=False, allow_unicode=True)
+    tmp.replace(target)
 
 
 def load_state() -> dict:
