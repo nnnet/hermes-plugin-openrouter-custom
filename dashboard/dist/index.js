@@ -140,7 +140,7 @@
         onChange: function (e) { props.onChange(e.target.value); },
         placeholder: props.placeholder || "",
       }),
-      props.hint && h("span", { className: "text-xs text-muted-foreground" }, props.hint),
+      props.hint && h("span", { className: "text-xs text-muted-foreground whitespace-pre-line font-courier" }, props.hint),
     );
   }
 
@@ -171,7 +171,9 @@
         onChange: function (e) { props.onChange(e.target.value); },
         className: "border border-border bg-background/40 px-3 py-2 text-sm",
       }, props.options.map(function (opt) {
-        return h("option", { key: opt, value: opt }, opt);
+        var val = typeof opt === "string" ? opt : opt.value;
+        var lbl = typeof opt === "string" ? opt : opt.label;
+        return h("option", { key: val, value: val }, lbl);
       })),
     );
   }
@@ -186,7 +188,7 @@
         placeholder: props.placeholder || "",
         className: "border border-border bg-background/40 px-3 py-2 text-sm font-courier",
       }),
-      props.hint && h("span", { className: "text-xs text-muted-foreground" }, props.hint),
+      props.hint && h("span", { className: "text-xs text-muted-foreground whitespace-pre-line font-courier" }, props.hint),
     );
   }
 
@@ -290,7 +292,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.6"),
+              h(Badge, { variant: "outline" }, "v0.4.7"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -412,7 +414,15 @@
             SelectRow({
               label: tx(t, "ranking.primary", "Primary key"),
               value: ranking.rank_by || "prefer_match",
-              options: ["prefer_match", "context_desc", "params_desc", "params_asc", "modality_pref", "tools_count", "latency_p95"],
+              options: [
+                { value: "prefer_match",  label: "prefer_match — matches prefer_patterns regex" },
+                { value: "context_desc",  label: "context_desc — larger context wins" },
+                { value: "params_desc",   label: "params_desc — larger model wins (more B)" },
+                { value: "params_asc",    label: "params_asc — smaller model wins (fewer B)" },
+                { value: "modality_pref", label: "modality_pref — multimodal > text-only" },
+                { value: "tools_count",   label: "tools_count — more supported_parameters" },
+                { value: "latency_p95",   label: "latency_p95 — faster (from observed history)" },
+              ],
               onChange: function (v) { patch(["ranking", "rank_by"], v); },
             }),
             h("div", { className: "col-span-2" },
@@ -421,8 +431,15 @@
                 value: lines(ranking.tiebreakers),
                 onChange: function (v) { patch(["ranking", "tiebreakers"], fromLines(v)); },
                 hint: tx(t, "ranking.tiebreakers_hint",
-                  "Allowed: prefer_match, context_desc, params_desc, params_asc, modality_pref, tools_count, latency_p95. " +
-                  "The primary key is auto-skipped if you list it here too."),
+                  "Allowed keys (one per line):\n" +
+                  "  prefer_match  — matches prefer_patterns regex\n" +
+                  "  context_desc  — larger context wins\n" +
+                  "  params_desc   — larger model wins (more B)\n" +
+                  "  params_asc    — smaller model wins (fewer B)\n" +
+                  "  modality_pref — multimodal > text-only\n" +
+                  "  tools_count   — more supported_parameters\n" +
+                  "  latency_p95   — faster (from observed history)\n" +
+                  "The primary key is auto-skipped if listed here too."),
                 rows: 3,
               }),
             ),

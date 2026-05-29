@@ -172,7 +172,10 @@ def rank(items: list[dict], ranking: dict, prefer_patterns: list[str]) -> list[d
             "params_desc": params_b,
             # Reverse: smaller models score higher. Negated so the
             # outer ``-feats[k]`` flip still produces ascending order.
-            "params_asc": -params_b,
+            # Items without parseable B (params_b==0) get a very negative
+            # score so they rank LAST in asc order, matching the desc
+            # convention where unparseable also ranks last.
+            "params_asc": -params_b if params_b > 0 else -1e9,
             "latency_p95": -1 * (item.get("_latency_p95") or 0),  # state-injected
         }
 

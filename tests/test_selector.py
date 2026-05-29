@@ -193,14 +193,17 @@ def test_rank_params_desc() -> None:
 
 
 def test_rank_params_asc() -> None:
-    """params_asc reverses the order — smaller model wins."""
+    """params_asc reverses the order — smaller model wins, but
+    unparseable descriptions (params_billions==0) rank LAST, same as
+    params_desc convention."""
     items = [
         _item("small:free", 100000, ["tools"]) | {"description": "Mini 8B variant"},
         _item("big:free", 100000, ["tools"]) | {"description": "Large 70B mixture-of-experts"},
         _item("mid:free", 100000, ["tools"]) | {"description": "Balanced 32B model"},
+        _item("unknown:free", 100000, ["tools"]) | {"description": "No size info here"},
     ]
     out = rank(items, {"rank_by": "params_asc", "tiebreakers": []}, [])
-    assert [i["id"] for i in out] == ["small:free", "mid:free", "big:free"]
+    assert [i["id"] for i in out] == ["small:free", "mid:free", "big:free", "unknown:free"]
 
 
 def test_rank_prefer_match() -> None:
