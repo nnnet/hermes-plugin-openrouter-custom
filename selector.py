@@ -30,6 +30,21 @@ def fetch_live_catalog(api_key: str | None = None, timeout: float = 8.0) -> list
     return [m for m in data if isinstance(m, dict) and m.get("id")]
 
 
+def _price_per_million(pricing: dict, key: str) -> float:
+    """Return USD per 1 000 000 tokens for the given pricing field.
+
+    OpenRouter exposes pricing as decimal strings keyed by direction
+    (``prompt``, ``completion``, ``request``, ``image``) in **USD per
+    token**. Multiply by 1e6 to get a human-comparable per-million rate.
+    A malformed or missing value is treated as +inf so the candidate is
+    excluded unless the user explicitly accepts unbounded pricing.
+    """
+    try:
+        return float(pricing.get(key, "0") or 0) * 1_000_000
+    except (TypeError, ValueError):
+        return float("inf")
+
+
 def apply_filters(items: list[dict], filters: dict) -> list[dict]:
     """Keep only items that pass every filter clause."""
     if not items:
@@ -38,12 +53,30 @@ def apply_filters(items: list[dict], filters: dict) -> list[dict]:
     modality_req = (filters.get("modality") or "any").strip().lower()
     min_ctx = int(filters.get("min_context", 0) or 0)
     require_tools = bool(filters.get("require_tools", False))
+    # free_only kept as back-compat shortcut; superseded by price.{prompt,completion}_max.
     free_only = bool(filters.get("free_only", False))
+
+    price_cfg = filters.get("price") or {}
+    try:
+        prompt_max = float(price_cfg.get("prompt_max", 0) or 0)
+    except (TypeError, ValueError):
+        prompt_max = 0.0
+    try:
+        completion_max = float(price_cfg.get("completion_max", 0) or 0)
+    except (TypeError, ValueError):
+        completion_max = 0.0
 
     kept: list[dict] = []
     for item in items:
         mid = str(item.get("id") or "")
         if free_only and not mid.endswith(":free"):
+            continue
+        pricing = item.get("pricing") or {}
+        prompt_per_m = _price_per_million(pricing, "prompt")
+        completion_per_m = _price_per_million(pricing, "completion")
+        if prompt_per_m > prompt_max:
+            continue
+        if completion_per_m > completion_max:
             continue
         ctx = int(item.get("context_length") or 0)
         if ctx < min_ctx:
@@ -137,6 +170,8 @@ def pick_best(
                 "context_length": int(c.get("context_length") or 0),
                 "modality": str((c.get("architecture") or {}).get("modality") or ""),
                 "supports_tools": "tools" in (c.get("supported_parameters") or []),
+                "prompt_per_million_usd": _price_per_million(c.get("pricing") or {}, "prompt"),
+                "completion_per_million_usd": _price_per_million(c.get("pricing") or {}, "completion"),
             }
             for c in top
         ],

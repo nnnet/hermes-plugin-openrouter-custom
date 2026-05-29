@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.1.0
+version: 0.2.0
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -15,12 +15,17 @@ repo: https://github.com/nnnet/hermes-plugin-openrouter-custom
 config:
   # Stable pseudo-name shown in /model picker. The on_session_start hook
   # substitutes this with the currently-chosen real OR model id at session
-  # boundaries.
-  pseudo_model_alias: or-best-free
+  # boundaries. Real OR ids that pass the filters are listed alongside, so
+  # the operator can either pin a specific id or always ride the alias.
+  pseudo_model_alias: best-free
 
   # Filters — model must pass all of these to enter the candidate pool.
   filters:
-    free_only: true              # only :free models
+    # USD per **million tokens**. Default 0/0 = free-only. Set a budget
+    # (e.g. prompt_max: 0.5) to also surface near-free paid tiers.
+    price:
+      prompt_max: 0
+      completion_max: 0
     min_context: 65536           # context_length must be >= this
     require_tools: true          # supported_parameters must contain "tools"
     modality: text               # text | text+image | any

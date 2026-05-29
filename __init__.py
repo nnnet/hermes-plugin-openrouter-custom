@@ -116,18 +116,32 @@ if ProviderProfile is not None:
             api_key: str | None = None,
             timeout: float = 8.0,
         ) -> list[str] | None:
-            """Return only the pseudo alias — never the OR catalog.
+            """Surface the pseudo alias and every candidate that passed the filter.
 
-            The picker uses this for its model list.  We surface a single
-            stable name so the operator picks ``or-best-free`` once and
-            never has to re-pick when the underlying real model id rotates.
+            The picker calls this on every ``/model`` open.  We respond with
+            ``[alias, *current_candidate_ids]`` from state.json so the operator
+            can either ride the auto-picked alias (rotates per cron tick) or
+            pin a specific id from the current pool.  Empty state.json falls
+            back to just the alias — refresh.py has not run yet.
             """
             cfg = load_config()
-            alias = (cfg.get("pseudo_model_alias") or "or-best-free").strip()
-            return [alias] if alias else None
+            alias = (cfg.get("pseudo_model_alias") or "best-free").strip()
+            state = load_state()
+            ids = [
+                str(c.get("id", "")).strip()
+                for c in (state.get("candidates_top") or [])
+                if c.get("id")
+            ]
+            result: list[str] = []
+            if alias:
+                result.append(alias)
+            for mid in ids:
+                if mid and mid != alias and mid not in result:
+                    result.append(mid)
+            return result or None
 
     _cfg_for_profile = load_config()
-    _pseudo_alias = (_cfg_for_profile.get("pseudo_model_alias") or "or-best-free").strip()
+    _pseudo_alias = (_cfg_for_profile.get("pseudo_model_alias") or "best-free").strip()
 
     openrouter_custom = OpenRouterCustomProfile(
         name="openrouter_custom",
@@ -168,9 +182,10 @@ def _on_session_start(agent: Any = None, **_kwargs: Any) -> None:
     if provider != "openrouter_custom":
         return
     cfg = load_config()
-    alias = (cfg.get("pseudo_model_alias") or "or-best-free").strip()
+    alias = (cfg.get("pseudo_model_alias") or "best-free").strip()
     current_model = (getattr(agent, "model", "") or "").strip()
     if current_model != alias:
+        # User pinned a specific real id from the picker pool — leave it.
         return
     state = load_state()
     real_id = (state.get("real_model_id") or "").strip()

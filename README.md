@@ -2,6 +2,8 @@
 
 OpenRouter live-catalog filter with a **stable pseudo-model alias**.
 
+> Target host: [NousResearch/hermes-agent](https://github.com/nousresearch/hermes-agent) — the upstream Hermes Agent. This plugin slots into Hermes's `plugins/model-providers/` discovery path; it is not standalone.
+
 ## What it does
 
 OpenRouter's `:free` tier rotates rapidly — new models appear, old ones get
@@ -18,11 +20,13 @@ satisfies my hard constraints". A cron job re-evaluates the catalog every
 
 ```bash
 # /model <pseudo-alias> --provider openrouter_custom --global
-/model or-best-free --provider openrouter_custom --global
+/model best-free --provider openrouter_custom --global
 ```
 
 All subsequent sessions on the chosen platform/profile transparently use
-whichever real OR id the cron last picked.
+whichever real OR id the cron last picked. The `/model` picker also lists
+every other id that currently passes the filter — pick a specific one if
+you want to pin instead of ride the alias.
 
 ## Configuration
 
@@ -31,9 +35,11 @@ start — no gateway restart required:
 
 ```yaml
 config:
-  pseudo_model_alias: or-best-free
+  pseudo_model_alias: best-free
   filters:
-    free_only: true
+    price:
+      prompt_max: 0          # USD per million tokens (default 0 = free)
+      completion_max: 0      # USD per million tokens
     min_context: 65536
     require_tools: true
     modality: text
@@ -51,14 +57,16 @@ config:
 
 ### Filter semantics
 
-| Field             | Behaviour                                                                  |
-|-------------------|----------------------------------------------------------------------------|
-| `free_only`       | Model `id` must end with `:free`.                                          |
-| `min_context`     | Model `context_length` must be `>=` this number (tokens).                  |
-| `require_tools`   | `supported_parameters` must contain `"tools"`.                             |
-| `modality`        | `text`, `text+image`, or `any`. Substring match against `architecture.modality`. |
-| `exclude_patterns`| Python regex blacklist on `id`. First match drops the model.               |
-| `prefer_patterns` | Python regex used for ranking boost. More matches = higher score.          |
+| Field                       | Behaviour                                                                  |
+|-----------------------------|----------------------------------------------------------------------------|
+| `price.prompt_max`          | Maximum input price in **USD per million tokens**. `0` = free-only.        |
+| `price.completion_max`      | Maximum output price in **USD per million tokens**. `0` = free-only.       |
+| `free_only` (back-compat)   | Model `id` must end with `:free`. Wins over the price budget when set.     |
+| `min_context`               | Model `context_length` must be `>=` this number (tokens).                  |
+| `require_tools`             | `supported_parameters` must contain `"tools"`.                             |
+| `modality`                  | `text`, `text+image`, or `any`. Substring match against `architecture.modality`. |
+| `exclude_patterns`          | Python regex blacklist on `id`. First match drops the model.               |
+| `prefer_patterns`           | Python regex used for ranking boost. More matches = higher score.          |
 
 ### Ranking semantics
 
