@@ -82,6 +82,26 @@ def test_strict_free_excludes_zero_priced_non_free_wildcards() -> None:
     assert [i["id"] for i in out] == ["qwen3-coder:free"]
 
 
+def test_negative_pricing_excluded_under_any_finite_budget() -> None:
+    """OR uses ``"-1"`` as a "dynamic" pricing sentinel for platform
+    wildcards (openrouter/auto routes to underlying paid models). It
+    must NOT pass as "cheaper than zero" — that would silently leak
+    paid traffic into a free-tier alias."""
+    items = [
+        _item("openrouter/auto", 2000000, ["tools"],
+              prompt_per_token=-1.0, completion_per_token=-1.0),
+        _item("qwen3-coder:free", 200000, ["tools"]),
+    ]
+    # finite budget (paid mode) — auto must still be excluded.
+    out = apply_filters(
+        items,
+        {"require_tools": True, "min_context": 0, "modality": "any",
+         "price": {"prompt_max": 5.0, "completion_max": 5.0}},
+    )
+    assert "openrouter/auto" not in [i["id"] for i in out]
+    assert "qwen3-coder:free" in [i["id"] for i in out]
+
+
 def test_strict_free_disengages_at_nonzero_budget() -> None:
     """When the operator allows any non-zero budget, the strict :free
     rule must NOT engage — otherwise paid id pools would silently shed

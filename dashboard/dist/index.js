@@ -287,7 +287,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.3"),
+              h(Badge, { variant: "outline" }, "v0.4.4"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },

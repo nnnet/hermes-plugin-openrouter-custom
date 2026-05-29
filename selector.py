@@ -36,13 +36,24 @@ def _price_per_million(pricing: dict, key: str) -> float:
     OpenRouter exposes pricing as decimal strings keyed by direction
     (``prompt``, ``completion``, ``request``, ``image``) in **USD per
     token**. Multiply by 1e6 to get a human-comparable per-million rate.
-    A malformed or missing value is treated as +inf so the candidate is
-    excluded unless the user explicitly accepts unbounded pricing.
+
+    Defensive handling:
+
+    * Missing / malformed value → +inf (excluded under any finite budget).
+    * Negative value (e.g. ``"-1"``) → +inf as well. OR uses ``-1`` as a
+      "dynamic / not-fixed" sentinel for platform wildcards like
+      ``openrouter/auto`` whose real per-token cost depends on which
+      underlying paid model wins the routing. Treating it as cheaper
+      than zero would silently leak paid traffic into the free-tier
+      candidate pool.
     """
     try:
-        return float(pricing.get(key, "0") or 0) * 1_000_000
+        raw = float(pricing.get(key, "0") or 0)
     except (TypeError, ValueError):
         return float("inf")
+    if raw < 0:
+        return float("inf")
+    return raw * 1_000_000
 
 
 def apply_filters(items: list[dict], filters: dict) -> list[dict]:
