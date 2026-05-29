@@ -53,7 +53,34 @@ config:
     on_failure: keep_last        # keep_last | rotate | fallback_static
     fallback_static_id: qwen/qwen3-coder:free
   max_candidates: 10
+  internal_fallback:
+    sequential_count: 1          # M — OR-native fallback depth (1 = off)
 ```
+
+## Internal sequential fallback (M)
+
+OpenRouter accepts a `models: [id1, id2, ...]` array in the chat-completions
+request body. When the first id returns a transport-level failure
+(HTTP 4xx/5xx, timeout, offline), OR walks the list server-side and only
+surfaces a hard failure once every candidate refuses. We piggy-back on this
+to make the alias more resilient without writing any proxy code:
+
+* `internal_fallback.sequential_count: 1` (default) — current behaviour.
+  Only the single top candidate is sent.
+* `internal_fallback.sequential_count: N` (N > 1) — when the request
+  resolves through the pseudo alias (`best-free`), the plugin attaches
+  the top-N candidate ids from `state.candidates_top` as the request body's
+  `models` field. Hermes's external fallback chain (e.g. `claude-haiku-4-5`)
+  only triggers when the whole internal pool is exhausted.
+
+**Scope.** The injection happens only when the session was resolved from
+the pseudo alias. A direct pick (`/model qwen3-coder:free`) is never
+wrapped — the operator chose a specific id and we respect that.
+
+**Caveat.** OR's native fallback fires only on transport-level failures.
+A 200 OK whose content is a content-level refusal ("I can't help with
+that") is success from OR's perspective and is NOT retried. Detecting
+that requires a separate in-plugin proxy and is out of scope.
 
 ### Filter semantics
 

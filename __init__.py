@@ -179,6 +179,25 @@ if ProviderProfile is not None:
     class OpenRouterCustomProfile(ProviderProfile):  # type: ignore[misc]
         """OpenRouter aggregator behind a single pseudo-model handle."""
 
+        # Set of session_ids whose ``resolve_runtime_model`` matched the
+        # pseudo alias.  ``build_extra_body`` reads this to decide whether
+        # to inject the OR-native ``models: [...]`` sequential-fallback
+        # array.  Membership is per-process and ephemeral — sessions
+        # forgotten on gateway restart, which is fine because Hermes
+        # re-resolves on the next turn.
+        _alias_sessions: set[str] = set()
+
+        @classmethod
+        def _mark_alias_session(cls, session_id: object) -> None:
+            sid = str(session_id or "")
+            if sid:
+                cls._alias_sessions.add(sid)
+
+        @classmethod
+        def _is_alias_session(cls, session_id: object) -> bool:
+            sid = str(session_id or "")
+            return bool(sid) and sid in cls._alias_sessions
+
         def resolve_runtime_model(self, model: str, **_context: object) -> str:  # type: ignore[override]
             """Swap the pseudo alias for the current real id from state.json.
 
@@ -187,6 +206,13 @@ if ProviderProfile is not None:
             cron-refreshed best candidate and substitute.  When the
             operator pinned a specific real id from the picker pool,
             we return it unchanged.
+
+            Side effect: when the alias matched, this session's
+            ``session_id`` is recorded so a later ``build_extra_body``
+            call can decide to add the OR ``models: [...]`` sequential
+            fallback array.  Without this marker we would have no way to
+            distinguish "user picked top-1 directly" from "user picked
+            the alias which currently resolves to top-1".
             """
             cfg = load_config()
             alias = (cfg.get("pseudo_model_alias") or "best-free").strip()
@@ -201,7 +227,55 @@ if ProviderProfile is not None:
                     alias,
                 )
                 return model
+            # Remember this session resolved from the alias so
+            # build_extra_body can opt into sequential fallback below.
+            self._mark_alias_session(_context.get("session_id"))
             return real
+
+        def build_extra_body(  # type: ignore[override]
+            self, *, session_id: str | None = None, **context: object
+        ) -> dict[str, object]:
+            """Inject OR-native ``models: [...]`` for alias-resolved sessions.
+
+            Only fires when both conditions hold:
+
+            1. The session's model was resolved from the pseudo alias
+               (recorded by ``resolve_runtime_model`` above).
+            2. ``config.internal_fallback.sequential_count > 1``.
+
+            We pull the top-M candidate ids from state.json and pass them
+            as the request body's ``models`` field. OpenRouter walks the
+            list server-side and only returns a hard failure when every
+            candidate refuses — at which point Hermes's external
+            fallback chain (claude-haiku-4-5, etc.) takes over.
+
+            When the operator picked a concrete real id from the
+            ``/model`` picker instead of riding the alias, we return an
+            empty dict and the request goes through as a single-model
+            call.
+            """
+            if not self._is_alias_session(session_id):
+                return {}
+            cfg = load_config()
+            internal = cfg.get("internal_fallback") or {}
+            try:
+                m = int(internal.get("sequential_count", 1) or 1)
+            except (TypeError, ValueError):
+                m = 1
+            if m <= 1:
+                return {}
+            state = load_state()
+            candidates = state.get("candidates_top") or []
+            ids: list[str] = []
+            for entry in candidates:
+                cid = str((entry or {}).get("id") or "").strip()
+                if cid and cid not in ids:
+                    ids.append(cid)
+                if len(ids) >= m:
+                    break
+            if len(ids) < 2:
+                return {}
+            return {"models": ids}
 
         def fetch_models(  # type: ignore[override]
             self,

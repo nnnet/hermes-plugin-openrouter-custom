@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.3.6
+version: 0.4.0
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -29,7 +29,8 @@ config:
     min_context: 65536           # context_length must be >= this
     require_tools: true          # supported_parameters must contain "tools"
     modality: text               # text | text+image | any
-    exclude_patterns: []         # regex blacklist matched against model id
+    exclude_patterns:            # regex blacklist matched against model id
+      - ^openrouter/auto$        # platform-routed wildcard, not a real free model
     prefer_patterns:             # regex boost during ranking
       - qwen3
       - llama-3\.3
@@ -52,3 +53,25 @@ config:
 
   # Optional cap on number of candidates kept in state file.
   max_candidates: 10
+
+  # Internal sequential fallback within OpenRouter (only when the request
+  # uses the pseudo alias above — direct picks of a concrete free model
+  # are never wrapped). Implemented via OR's native ``models: [...]``
+  # request-body parameter: OR tries them in order on its side and only
+  # surfaces a hard failure to us when every candidate refuses.
+  #
+  # sequential_count = 1 means the current behaviour (just send the top
+  # candidate; OR uses its single-model code path).  Setting it to N > 1
+  # tells OR to fall through to the next N-1 candidates from our ranked
+  # pool when the primary returns 4xx/5xx/timeout. Hermes's external
+  # fallback chain (e.g. claude-haiku-4-5) only triggers when the entire
+  # internal pool is exhausted.
+  #
+  # Note: OR's native fallback fires only on transport-level failures
+  # (HTTP error, no key, model offline). A 200 OK whose content is a
+  # content-level refusal ("I can't help with that") is success from OR's
+  # perspective and is NOT retried. Detecting that requires a separate
+  # in-plugin proxy and is out of scope here.
+  internal_fallback:
+    sequential_count: 1
+

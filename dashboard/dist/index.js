@@ -230,6 +230,7 @@
     const price = filters.price || {};
     const ranking = config.ranking || {};
     const refresh = config.refresh || {};
+    const internal = config.internal_fallback || {};
 
     return h("div", { className: "flex flex-col gap-6 max-w-4xl" },
 
@@ -238,7 +239,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.3.6"),
+              h(Badge, { variant: "outline" }, "v0.4.0"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -401,6 +402,42 @@
             fallback: 10,
             onChange: function (v) { patch(["max_candidates"], v); },
           }),
+        ),
+      ),
+
+      h(Card, null,
+        h(CardHeader, null,
+          h(CardTitle, { className: "text-base" },
+            tx(t, "section.internal_fallback", "Internal sequential fallback")),
+        ),
+        h(CardContent, { className: "flex flex-col gap-3" },
+          h("p", { className: "text-xs text-muted-foreground" },
+            tx(t, "internal_fallback.intro",
+              "Applies only when the request uses the pseudo alias above " +
+              "(direct picks of a concrete model are never wrapped). " +
+              "Implemented via OpenRouter's native models[] request-body " +
+              "parameter — OR walks the list server-side and only surfaces " +
+              "a hard failure to Hermes when every candidate refuses.")),
+          NumberRow({
+            label: tx(t, "internal_fallback.sequential_count",
+              "Sequential fallback depth (M)"),
+            value: internal.sequential_count,
+            fallback: 1,
+            onChange: function (v) {
+              const n = Math.max(1, Math.floor(asNumber(v, 1)));
+              patch(["internal_fallback", "sequential_count"], n);
+            },
+            hint: tx(t, "internal_fallback.sequential_count_hint",
+              "1 = current behaviour (no fallback). N > 1 sends the top-N " +
+              "candidate ids; OR falls through to the next on 4xx/5xx/timeout. " +
+              "Capped by the current candidate pool size."),
+          }),
+          h("p", { className: "text-xs text-amber-500/80" },
+            tx(t, "internal_fallback.caveat",
+              "Caveat: OR's native fallback fires only on transport-level " +
+              "failures. A 200 OK whose content is a refusal (\"I can't help " +
+              "with that\") is success from OR's perspective and is NOT " +
+              "retried.")),
         ),
       ),
 
