@@ -253,11 +253,6 @@ if ProviderProfile is not None:
             return bool(sid) and sid in cls._ensure_loaded()
 
         def resolve_runtime_model(self, model: str, **_context: object) -> str:  # type: ignore[override]
-            # DEBUG-v0.7.0: trace what model + session_id flow through here
-            logger.warning(
-                "DEBUG resolve_runtime_model called: model=%r session_id=%r alias=%r",
-                model, _context.get("session_id"), (load_config().get("pseudo_model_alias") or "best-free"),
-            )
             """Swap the pseudo alias for the current real id from state.json.
 
             Called by conversation_loop on every new session. When the
@@ -313,11 +308,6 @@ if ProviderProfile is not None:
             empty dict and the request goes through as a single-model
             call.
             """
-            # DEBUG-v0.7.0
-            logger.warning(
-                "DEBUG build_extra_body called: session_id=%r model=%r is_alias=%s",
-                session_id, context.get("model"), self._is_alias_session(session_id),
-            )
             # Pure alias-marker semantics: rotation activates ONLY when
             # the session was resolved from the pseudo alias (set by
             # resolve_runtime_model). When the operator pinned a
