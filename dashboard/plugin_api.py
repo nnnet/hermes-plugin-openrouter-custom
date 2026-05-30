@@ -244,6 +244,29 @@ class _ProbeEnabledPayload(BaseModel):
     enabled: bool
 
 
+@router.get("/meta")
+async def meta() -> dict:
+    """Return plugin metadata (name, version, kind) from plugin.yaml.
+
+    UI's version badge reads this so we have a single source of truth
+    for the plugin version — bump only ``plugin.yaml`` and every
+    surface updates after the next /meta poll.
+    """
+    try:
+        import yaml as _yaml
+        fp = _pkg.PLUGIN_DIR / "plugin.yaml"
+        with open(fp) as f:
+            data = _yaml.safe_load(f) or {}
+        return {
+            "name": str(data.get("name", "")),
+            "version": str(data.get("version", "")),
+            "kind": str(data.get("kind", "")),
+        }
+    except Exception as exc:
+        logger.exception("meta read failed")
+        return {"name": "", "version": "?", "kind": "", "error": str(exc)}
+
+
 @router.get("/probe-enabled")
 async def get_probe_enabled() -> dict:
     """Return the current probe-enabled flag (cfg.probe_enabled)."""

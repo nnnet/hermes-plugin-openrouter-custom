@@ -199,6 +199,10 @@
     const [state, setState] = useState(null);
     const [health, setHealth] = useState(null);
     const [probeEnabled, setProbeEnabled] = useState(true);
+    // Plugin meta (name, version) — single source of truth lives in
+    // plugin.yaml; UI fetches it via /meta so we never duplicate the
+    // version string in JS or manifest.json.
+    const [meta, setMeta] = useState({ version: "" });
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState(null);
     const [err, setErr] = useState(null);
@@ -213,6 +217,7 @@
         api("/state"),
         api("/health").catch(function () { return null; }),
         api("/probe-enabled").catch(function () { return { enabled: true }; }),
+        api("/meta").catch(function () { return { version: "" }; }),
       ])
         .then(function (results) {
           setDefaults(results[0].defaults || {});
@@ -220,6 +225,7 @@
           setState(results[1] || {});
           setHealth((results[2] && results[2].models) ? results[2].models : {});
           setProbeEnabled(results[3] && results[3].enabled !== false);
+          setMeta(results[4] || { version: "" });
           setErr(null);
         })
         .catch(function (e) { setErr(String(e && e.message || e)); })
@@ -407,7 +413,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.7.14"),
+              h(Badge, { variant: "outline" }, "v" + (meta.version || "?")),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
