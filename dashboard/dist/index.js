@@ -197,17 +197,19 @@
     const [defaults, setDefaults] = useState(null);
     const [config, setConfig] = useState(null);
     const [state, setState] = useState(null);
+    const [health, setHealth] = useState(null);
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState(null);
     const [err, setErr] = useState(null);
 
     const reload = useCallback(function () {
       setBusy(true);
-      Promise.all([api("/config"), api("/state")])
+      Promise.all([api("/config"), api("/state"), api("/health").catch(function () { return null; })])
         .then(function (results) {
           setDefaults(results[0].defaults || {});
           setConfig(deepClone(results[0].config || {}));
           setState(results[1] || {});
+          setHealth((results[2] && results[2].models) ? results[2].models : {});
           setErr(null);
         })
         .catch(function (e) { setErr(String(e && e.message || e)); })
@@ -262,6 +264,33 @@
         .finally(function () { setBusy(false); });
     }
 
+    function probeNow() {
+      setBusy(true); setMsg(null); setErr(null);
+      api("/probe", { method: "POST" })
+        .then(function (sum) {
+          return api("/health").then(function (h) {
+            setHealth((h && h.models) ? h.models : {});
+            setMsg(tx(t, "msg.probed",
+              "Probed: {ok}/{probed} ok, {failed} failed",
+              { ok: sum.ok, probed: sum.probed, failed: sum.failed }));
+          });
+        })
+        .catch(function (e) { setErr(String(e && e.message || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
+    function resetHealth() {
+      if (!window.confirm("Wipe health.json? All circuit-open marks and counters will be cleared.")) return;
+      setBusy(true); setMsg(null); setErr(null);
+      api("/health/reset", { method: "POST" })
+        .then(function () {
+          setHealth({});
+          setMsg(tx(t, "msg.health_reset", "Health table reset."));
+        })
+        .catch(function (e) { setErr(String(e && e.message || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
     function resetDefaults() {
       if (!defaults) return;
       setConfig(deepClone(defaults));
@@ -292,7 +321,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.4.9"),
+              h(Badge, { variant: "outline" }, "v0.5.0"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -596,6 +625,134 @@
               "failures. A 200 OK whose content is a refusal (\"I can't help " +
               "with that\") is success from OR's perspective and is NOT " +
               "retried.")),
+        ),
+      ),
+
+      h(Card, null,
+        h(CardHeader, null,
+          h("div", { className: "flex items-center justify-between" },
+            h(CardTitle, { className: "text-base" },
+              tx(t, "section.rotation", "Rotation strategy")),
+            h("div", { className: "flex gap-2" },
+              h(Button, {
+                variant: "outline", size: "sm",
+                onClick: probeNow, disabled: busy,
+              }, tx(t, "btn.probe", "Probe now")),
+              h(Button, {
+                variant: "ghost", size: "sm",
+                onClick: resetHealth, disabled: busy,
+              }, tx(t, "btn.reset_health", "Reset health")),
+            ),
+          ),
+        ),
+        h(CardContent, { className: "flex flex-col gap-3" },
+          h("p", { className: "text-xs text-muted-foreground" },
+            tx(t, "rotation.intro",
+              "Decides how the models[] array sent to OpenRouter is ordered. " +
+              "The probe cron (default 10m) pings every top-K candidate and " +
+              "writes outcomes to health.json; non-static modes consult it.")),
+          SelectRow({
+            label: tx(t, "rotation.mode", "Mode"),
+            value: config.rotation_mode || "static",
+            options: [
+              { value: "static",                 label: "static — strict ranking, no health awareness" },
+              { value: "failover_with_health",   label: "failover_with_health — skip cooldown'd models" },
+              { value: "circuit_breaker",        label: "circuit_breaker — half-open probe slot, exp backoff" },
+              { value: "sticky_health_weighted", label: "sticky_health_weighted — rank × success_rate" },
+            ],
+            onChange: function (v) { patch(["rotation_mode"], v); },
+          }),
+          h("details", { className: "rounded border border-border/60 px-3 py-2 text-xs" },
+            h("summary", { className: "cursor-pointer text-muted-foreground select-none" },
+              tx(t, "rotation.help.summary", "How does each mode behave?")),
+            h("div", { className: "mt-2 space-y-2" },
+              h("div", null,
+                h("span", { className: "font-courier text-emerald-500" }, "static"),
+                " — ",
+                tx(t, "rotation.help.static",
+                  "Original behaviour. Sends top-N candidates to OR in strict " +
+                  "ranking order. Ignores health.json entirely.")),
+              h("div", null,
+                h("span", { className: "font-courier text-emerald-500" }, "failover_with_health"),
+                " — ",
+                tx(t, "rotation.help.failover_with_health",
+                  "Same ranking but skips any model whose circuit is OPEN " +
+                  "with an unexpired cooldown. Models return automatically " +
+                  "when the cooldown elapses.")),
+              h("div", null,
+                h("span", { className: "font-courier text-emerald-500" }, "circuit_breaker"),
+                " — ",
+                tx(t, "rotation.help.circuit_breaker",
+                  "Adds an explicit HALF_OPEN probe step: when a model's " +
+                  "cooldown ends, it's promoted to slot 1 (one-shot). A " +
+                  "success closes the circuit; a failure re-opens it with " +
+                  "exponential backoff (5m → 10m → 20m → 40m → 80m).")),
+              h("div", null,
+                h("span", { className: "font-courier text-emerald-500" }, "sticky_health_weighted"),
+                " — ",
+                tx(t, "rotation.help.sticky_health_weighted",
+                  "Re-ranks every call: effective_score = rank_score × " +
+                  "success_rate (Beta-smoothed). Failing models drift " +
+                  "downward without ever being binary-blocked.")),
+            ),
+          ),
+          health && Object.keys(health).length > 0 && (function () {
+            const rows = Object.keys(health).map(function (mid) {
+              return [mid, health[mid] || {}];
+            }).sort(function (a, b) { return a[0] < b[0] ? -1 : 1; });
+            function shortAgo(iso) {
+              if (!iso) return "—";
+              const t0 = Date.parse(iso);
+              if (isNaN(t0)) return "—";
+              const dt = Math.max(0, Date.now() - t0);
+              const mins = Math.floor(dt / 60000);
+              if (mins < 1) return "<1m";
+              if (mins < 60) return mins + "m";
+              const hrs = Math.floor(mins / 60);
+              if (hrs < 24) return hrs + "h";
+              return Math.floor(hrs / 24) + "d";
+            }
+            function stateBadge(e) {
+              const s = (e && e.circuit_state) || "closed";
+              if (s === "open")      return h("span", { className: "text-red-500 font-courier" }, "🚫 open");
+              if (s === "half_open") return h("span", { className: "text-amber-500 font-courier" }, "⚠ half");
+              return h("span", { className: "text-emerald-500 font-courier" }, "✓ closed");
+            }
+            return h("div", { className: "mt-2 overflow-x-auto" },
+              h("table", { className: "w-full text-xs font-courier" },
+                h("thead", { className: "text-muted-foreground" },
+                  h("tr", null,
+                    h("th", { className: "text-left px-2 py-1" }, "Model"),
+                    h("th", { className: "text-right px-2 py-1" }, "✓"),
+                    h("th", { className: "text-right px-2 py-1" }, "✗"),
+                    h("th", { className: "text-right px-2 py-1" }, "Cons.fail"),
+                    h("th", { className: "text-left px-2 py-1" }, "Circuit"),
+                    h("th", { className: "text-left px-2 py-1" }, "Last err"),
+                    h("th", { className: "text-right px-2 py-1" }, "Last ok"),
+                    h("th", { className: "text-right px-2 py-1" }, "Last fail"),
+                  ),
+                ),
+                h("tbody", null, rows.map(function (row) {
+                  const mid = row[0]; const e = row[1];
+                  return h("tr", { key: mid, className: "border-t border-border/30" },
+                    h("td", { className: "px-2 py-1" }, mid),
+                    h("td", { className: "px-2 py-1 text-right" }, e.success || 0),
+                    h("td", { className: "px-2 py-1 text-right" }, e.fail || 0),
+                    h("td", { className: "px-2 py-1 text-right" }, e.consecutive_fail || 0),
+                    h("td", { className: "px-2 py-1" }, stateBadge(e)),
+                    h("td", { className: "px-2 py-1" }, e.last_error_class || "—"),
+                    h("td", { className: "px-2 py-1 text-right" }, shortAgo(e.last_success_iso)),
+                    h("td", { className: "px-2 py-1 text-right" }, shortAgo(e.last_fail_iso)),
+                  );
+                })),
+              ),
+            );
+          })(),
+          health && Object.keys(health).length === 0 && h("p",
+            { className: "text-xs text-muted-foreground italic" },
+            tx(t, "rotation.health_empty",
+              "No probe data yet. Click \"Probe now\" or wait for the next " +
+              "openrouter-custom-probe cron tick.")),
         ),
       ),
 

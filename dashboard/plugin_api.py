@@ -155,3 +155,38 @@ async def refresh_now() -> dict:
 async def get_state() -> dict:
     """Return the latest state.json — chosen real id + ranked candidates."""
     return _read_state()
+
+
+# ── health & probe ────────────────────────────────────────────────────────
+
+
+@router.get("/health")
+async def get_health() -> dict:
+    """Return current ``health.json`` for the dashboard's Health table."""
+    from openrouter_custom import health as _hlt
+    return _hlt.load_health(_pkg._state_dir())
+
+
+@router.post("/probe")
+async def probe_now() -> dict:
+    """Issue a 1-token ping to every top-K candidate, update health.json.
+
+    Returns the same summary structure as the cron probe so the UI can
+    display ``probed/ok/failed`` counters and per-model outcomes.
+    """
+    from openrouter_custom import probe as _probe
+    try:
+        return _probe.probe_all()
+    except Exception as exc:  # surface failure to the UI without 500
+        logger.exception("probe_all failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/health/reset")
+async def reset_health() -> dict:
+    """Wipe ``health.json``. Useful after changing the candidate pool or
+    when an operator wants to clear past circuit-open marks."""
+    from openrouter_custom import health as _hlt
+    empty = {"version": 1, "models": {}}
+    _hlt.save_health(_pkg._state_dir(), empty)
+    return {"ok": True, "models": {}}

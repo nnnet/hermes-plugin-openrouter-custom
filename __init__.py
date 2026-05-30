@@ -266,16 +266,77 @@ if ProviderProfile is not None:
                 return {}
             state = load_state()
             candidates = state.get("candidates_top") or []
-            ids: list[str] = []
-            for entry in candidates:
-                cid = str((entry or {}).get("id") or "").strip()
-                if cid and cid not in ids:
-                    ids.append(cid)
-                if len(ids) >= m:
-                    break
+
+            # Rotation: consult the configured strategy + current health.
+            try:
+                from . import rotation as _rot  # type: ignore[import-not-found]
+                from . import health as _hlt
+            except ImportError:  # pragma: no cover — flat import path
+                import rotation as _rot  # type: ignore[no-redef,import-not-found]
+                import health as _hlt  # type: ignore[no-redef]
+            mode = (cfg.get("rotation_mode") or "static")
+            health_data = _hlt.load_health(_state_dir())
+            ids = _rot.request_order(mode, candidates, health_data, m)
             if len(ids) < 2:
                 return {}
             return {"models": ids}
+
+        # ── Outcome observation (phase 2 — wired by host hook later) ─────
+        def observe_outcome(
+            self,
+            *,
+            response: object = None,
+            error: object = None,
+            request_models: list[str] | None = None,
+            **_ctx: object,
+        ) -> None:
+            """Record success/failure for rotation health tracking.
+
+            Phase 1 (current): called only by the probe cron via
+            ``record_outcome`` helper. The host conversation loop does
+            NOT call this hook yet — adding that call site is a small
+            patch to ``chat_completion_helpers.py`` in the hermes-agent
+            fork, planned as a follow-up.
+
+            ``response.model`` (OpenRouter echoes the actual model that
+            served the request) is used to attribute success. Any models
+            that were listed BEFORE the responder in ``request_models``
+            are recorded as having implicitly failed — that's the OR
+            sequential-fallback signal we promised the user.
+            """
+            try:
+                from . import health as _hlt
+            except ImportError:
+                import health as _hlt  # type: ignore[no-redef]
+            data = _hlt.load_health(_state_dir())
+            req = list(request_models or [])
+
+            if error is not None:
+                # Top-level error → every requested model is considered
+                # failed for this turn (OR couldn't satisfy any).
+                tag = type(error).__name__[:24]
+                for cid in req:
+                    _hlt.record_failure(data, cid, error_class=tag)
+                _hlt.save_health(_state_dir(), data)
+                return
+
+            actual = ""
+            if response is not None:
+                actual = str(getattr(response, "model", "") or "").strip()
+            if not actual:
+                # No model echo — nothing we can attribute.
+                return
+            if req and actual in req:
+                idx = req.index(actual)
+                for cid in req[:idx]:
+                    _hlt.record_failure(data, cid, error_class="bypassed")
+                _hlt.record_success(data, actual)
+            elif req:
+                # Responder not in requested list (e.g. OR auto-route).
+                _hlt.record_success(data, actual)
+            else:
+                _hlt.record_success(data, actual)
+            _hlt.save_health(_state_dir(), data)
 
         def fetch_models(  # type: ignore[override]
             self,
