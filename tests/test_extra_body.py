@@ -140,13 +140,16 @@ def test_alias_session_with_m3_returns_models_array(monkeypatch):
     assert out == {"models": ["a:free", "b:free", "c:free"]}
 
 
-def test_alias_session_with_only_one_candidate_returns_empty(monkeypatch):
-    """A single-candidate pool can't fall back — don't bother with models[]."""
+def test_alias_session_with_only_one_candidate_returns_solo_models_list(monkeypatch):
+    """v0.7.1+: a single-candidate pool now DOES inject ``models: [solo]``
+    because that may override OR's routing if ``agent.model`` differs
+    (e.g. ranking-frozen pick is circuit-OPEN). Sending a 1-element
+    array is harmless when they match and helpful when they don't."""
     _stub_config(monkeypatch, sequential_count=3)
     _stub_state(monkeypatch, ["solo:free"])
     p = _profile()
     p._mark_alias_session("sess-4")
-    assert p.build_extra_body(session_id="sess-4") == {}
+    assert p.build_extra_body(session_id="sess-4") == {"models": ["solo:free"]}
 
 
 def test_alias_session_with_m_larger_than_pool_caps_at_pool(monkeypatch):

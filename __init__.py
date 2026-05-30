@@ -337,8 +337,15 @@ if ProviderProfile is not None:
             mode = (cfg.get("rotation_mode") or "static")
             health_data = _hlt.load_health(_state_dir())
             ids = _rot.request_order(mode, candidates, health_data, m)
-            if len(ids) < 2:
+            if not ids:
+                # Nothing in the pool survived the rotation — let the
+                # bare agent.model go to OR as-is; external fallback
+                # chain will take over if it fails.
                 return {}
+            # Inject even a single-element list: when rotation has only
+            # one live candidate but it differs from agent.model (the
+            # alias's frozen ranking pick), OR will route to the
+            # rotation pick instead of the dead-circuit one.
             return {"models": ids}
 
         # ── Outcome observation (phase 2 — wired by host hook later) ─────
