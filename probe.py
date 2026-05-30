@@ -39,7 +39,8 @@ def _client(api_key: str | None):
     return OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=(api_key or os.environ.get("OPENROUTER_API_KEY", "") or "").strip(),
-        timeout=15.0,
+        timeout=8.0,
+        max_retries=0,  # don't retry inside the SDK — UI single-probe is one-shot
     )
 
 
