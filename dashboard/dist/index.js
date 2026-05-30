@@ -407,7 +407,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.7.11"),
+              h(Badge, { variant: "outline" }, "v0.7.12"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -823,7 +823,17 @@
             const reqOrderH = state && state.next_request_order || [];
             const reqPos = {};
             for (let i = 0; i < reqOrderH.length; i++) reqPos[reqOrderH[i]] = i + 1;
-            const rows = Object.keys(health).map(function (mid) {
+            // Union of health.json keys + state.candidates_top so models
+            // that were `reset`-deleted (or never pinged yet) still show
+            // a row labeled "untested" instead of disappearing from the
+            // table while Req-column up top still points at them.
+            const allIds = new Set(Object.keys(health));
+            const cTop = (state && state.candidates_top) || [];
+            for (let i = 0; i < cTop.length; i++) {
+              const cid = (cTop[i] || {}).id;
+              if (cid) allIds.add(cid);
+            }
+            const rows = Array.from(allIds).map(function (mid) {
               return [mid, health[mid] || {}];
             }).sort(function (a, b) {
               const pa = reqPos[a[0]] || 0;
