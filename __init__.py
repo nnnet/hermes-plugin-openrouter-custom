@@ -248,6 +248,27 @@ if ProviderProfile is not None:
             save_alias_sessions(sessions)
 
         @classmethod
+        def _unmark_alias_session(cls, session_id: object) -> None:
+            """Remove a session_id from the alias set.
+
+            Called from ``resolve_runtime_model`` when the agent's model
+            is NOT the pseudo alias — covers the case where the operator
+            ran ``/model <concrete-id>`` mid-session to opt out of
+            rotation. Without this, the marker from a prior alias turn
+            would persist and ``build_extra_body`` would still inject
+            ``models[...]`` even though the operator explicitly pinned
+            a single model.
+            """
+            sid = str(session_id or "")
+            if not sid:
+                return
+            sessions = cls._ensure_loaded()
+            if sid not in sessions:
+                return
+            sessions.discard(sid)
+            save_alias_sessions(sessions)
+
+        @classmethod
         def _is_alias_session(cls, session_id: object) -> bool:
             sid = str(session_id or "")
             return bool(sid) and sid in cls._ensure_loaded()
@@ -255,22 +276,32 @@ if ProviderProfile is not None:
         def resolve_runtime_model(self, model: str, **_context: object) -> str:  # type: ignore[override]
             """Swap the pseudo alias for the current real id from state.json.
 
-            Called by conversation_loop on every new session. When the
-            agent's pinned model is the pseudo alias, look up the
-            cron-refreshed best candidate and substitute.  When the
+            Called by conversation_loop on every new session and on every
+            turn (Hermes builds a fresh AIAgent per inbound message).
+            When the agent's pinned model is the pseudo alias, look up
+            the cron-refreshed best candidate and substitute.  When the
             operator pinned a specific real id from the picker pool,
-            we return it unchanged.
+            we return it unchanged AND remove any stale alias-marker
+            that a prior turn of the same session might have set.
 
-            Side effect: when the alias matched, this session's
-            ``session_id`` is recorded so a later ``build_extra_body``
-            call can decide to add the OR ``models: [...]`` sequential
-            fallback array.  Without this marker we would have no way to
-            distinguish "user picked top-1 directly" from "user picked
-            the alias which currently resolves to top-1".
+            Side effects:
+
+            * Alias match → ``_mark_alias_session(session_id)``. Later
+              ``build_extra_body`` reads this to decide whether to inject
+              the ``models: [...]`` rotation array.
+            * Non-alias model → ``_unmark_alias_session(session_id)``.
+              Critical when the operator runs ``/model <concrete-id>``
+              mid-session to opt out of rotation; without this, the
+              marker from the prior alias turn would persist and
+              rotation would keep firing against the operator's intent.
             """
             cfg = load_config()
             alias = (cfg.get("pseudo_model_alias") or "best-free").strip()
             if model != alias:
+                # Operator pinned a concrete model — drop any stale
+                # marker so rotation deactivates for the rest of this
+                # session.
+                self._unmark_alias_session(_context.get("session_id"))
                 return model
             state = load_state()
             real = (state.get("real_model_id") or "").strip()

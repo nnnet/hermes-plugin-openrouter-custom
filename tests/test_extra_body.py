@@ -216,6 +216,33 @@ def test_out_of_pool_model_still_returns_empty(monkeypatch):
     assert out == {}
 
 
+def test_concrete_pick_unmarks_prior_alias_session(monkeypatch):
+    """When the operator runs ``/model <concrete-id>`` mid-session, the
+    next ``resolve_runtime_model`` call sees a non-alias model and must
+    drop the stale alias-marker so rotation deactivates for subsequent
+    turns. Otherwise rotation keeps firing against the operator's
+    explicit single-model intent."""
+    monkeypatch.setattr(
+        orc, "load_config",
+        lambda: {
+            "pseudo_model_alias": "best-free",
+            "internal_fallback": {"sequential_count": 3},
+        },
+    )
+    _stub_state(monkeypatch, ["a:free", "b:free", "c:free"])
+    p = _profile()
+    # Simulate prior alias turn that set the marker.
+    p._mark_alias_session("sess-mixed")
+    assert p._is_alias_session("sess-mixed") is True
+    # Operator switches to concrete via /model.
+    out = p.resolve_runtime_model("c:free", session_id="sess-mixed")
+    assert out == "c:free"
+    # Marker should be gone.
+    assert p._is_alias_session("sess-mixed") is False
+    # And the next build_extra_body should NOT inject rotation.
+    assert p.build_extra_body(session_id="sess-mixed") == {}
+
+
 def test_alias_session_survives_persistence(tmp_path, monkeypatch):
     """The marker set is persisted to ``alias_sessions.json`` so it
     survives gateway restart.  Simulate a restart by wiping the in-memory
