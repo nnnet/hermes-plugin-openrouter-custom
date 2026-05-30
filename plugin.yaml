@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.7.15
+version: 0.7.16
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -90,12 +90,29 @@ config:
   internal_fallback:
     sequential_count: 4
 
-  # Probe — periodic 1-token pings to every top-K candidate that drive
-  # the rotation strategies' health data. Disable when the system is
-  # not using the alias (no session is being routed through rotation —
-  # probes would burn free-tier quota for nothing). UI toggles this
-  # under the Rotation card.
-  probe_enabled: true
+  # Health-tracking mode — decides whether per-model health data comes
+  # from passive observation only, or also from active probe pings.
+  #
+  #   observe_outcome  PASSIVE — rotation/quarantine driven ONLY by the
+  #                    observe_outcome hook on real conversation
+  #                    requests. Zero extra OR-quota usage. Recommended
+  #                    for free-tier accounts (OR caps at 50 req/day on
+  #                    accounts without ≥$10 purchase + 20 req/min on
+  #                    all :free models combined). May take longer to
+  #                    discover dead upstreams since no synthetic traffic
+  #                    is generated.
+  #   observe_prob     PASSIVE + ACTIVE — adds a 1-token probe cron that
+  #                    touches every top-K candidate. Burns roughly
+  #                    6 × top-K requests/hour against your OR quota.
+  #                    Use only with paid credits (≥$10 unlocks the
+  #                    1000/day cap; 20 req/min cap still applies).
+  health_mode: observe_outcome
+
+  # Probe — periodic 1-token pings to every top-K candidate. In
+  # observe_outcome mode it is forced off regardless of this flag. In
+  # observe_prob mode the cron runs only when this is true; flip via
+  # the Rotation card after switching the mode.
+  probe_enabled: false
 
   # Per-call HTTP timeout for probe requests. Free-tier upstreams may
   # take several seconds to respond — keep this short enough that a

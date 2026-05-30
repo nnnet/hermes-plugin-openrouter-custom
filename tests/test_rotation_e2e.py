@@ -158,6 +158,11 @@ def test_e2e_probe_auto_tune_triggers_refresh(tmp_path: pathlib.Path, monkeypatc
         "pseudo_alias": "best-free",
     })
 
+    # Force active probe mode (defaults changed to passive in v0.7.16).
+    monkeypatch.setattr(
+        probe_mod, "load_config",
+        lambda: {"health_mode": "observe_prob", "probe_enabled": True},
+    )
     # Stub _client to return a sentinel + _probe_one to mark top-4 mostly
     # failing (3 fail + 1 ok = 25% < 50% threshold).
     monkeypatch.setattr(probe_mod, "_client", lambda api_key, **_kw: object())
@@ -200,6 +205,10 @@ def test_e2e_probe_no_refresh_when_all_failed(tmp_path: pathlib.Path, monkeypatc
         "pseudo_alias": "best-free",
     })
 
+    monkeypatch.setattr(
+        probe_mod, "load_config",
+        lambda: {"health_mode": "observe_prob", "probe_enabled": True},
+    )
     monkeypatch.setattr(probe_mod, "_client", lambda api_key, **_kw: object())
     monkeypatch.setattr(
         probe_mod, "_probe_one",
