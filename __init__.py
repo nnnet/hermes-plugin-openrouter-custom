@@ -254,8 +254,6 @@ if ProviderProfile is not None:
             empty dict and the request goes through as a single-model
             call.
             """
-            if not self._is_alias_session(session_id):
-                return {}
             cfg = load_config()
             internal = cfg.get("internal_fallback") or {}
             try:
@@ -266,6 +264,23 @@ if ProviderProfile is not None:
                 return {}
             state = load_state()
             candidates = state.get("candidates_top") or []
+            candidate_ids = {
+                str((c or {}).get("id") or "").strip()
+                for c in candidates
+                if (c or {}).get("id")
+            }
+            # Two paths into rotation:
+            # 1. Session was alias-resolved this run (resolve_runtime_model
+            #    marked us). Original behaviour.
+            # 2. The current model is in our candidates_top pool — covers
+            #    the common case where the operator picked ``best-free``
+            #    via /model, the picker saved the RESOLVED real id (not the
+            #    alias) to sessions.db, and subsequent turns see a concrete
+            #    model that nevertheless lives inside our rotation pool.
+            current_model = str(context.get("model") or "").strip()
+            in_pool = bool(current_model) and current_model in candidate_ids
+            if not (self._is_alias_session(session_id) or in_pool):
+                return {}
 
             # Rotation: consult the configured strategy + current health.
             try:

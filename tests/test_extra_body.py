@@ -188,3 +188,27 @@ def test_resolve_runtime_model_does_not_mark_non_alias(monkeypatch):
     resolved = p.resolve_runtime_model("qwen3-coder:free", session_id="sess-7")
     assert resolved == "qwen3-coder:free"
     assert p.build_extra_body(session_id="sess-7") == {}
+
+
+def test_in_pool_model_enables_rotation_without_alias_marker(monkeypatch):
+    """Operator picked best-free in the picker; the picker resolved + saved
+    the concrete real id (e.g. ``a:free``) to sessions.db.  On the next
+    turn the session model is ``a:free`` (not the alias) and
+    resolve_runtime_model never marks the session — but ``a:free`` IS in
+    candidates_top, so rotation should still kick in."""
+    _stub_config(monkeypatch, sequential_count=3)
+    _stub_state(monkeypatch, ["a:free", "b:free", "c:free", "d:free"])
+    p = _profile()
+    # Note: NOT calling _mark_alias_session — simulates post-resolution turn.
+    out = p.build_extra_body(session_id="sess-noalias", model="a:free")
+    assert out == {"models": ["a:free", "b:free", "c:free"]}
+
+
+def test_out_of_pool_model_still_returns_empty(monkeypatch):
+    """If the picked model is NOT in candidates_top (operator pinned
+    something explicit and unrelated), rotation does NOT activate."""
+    _stub_config(monkeypatch, sequential_count=3)
+    _stub_state(monkeypatch, ["a:free", "b:free", "c:free"])
+    p = _profile()
+    out = p.build_extra_body(session_id="sess-x", model="anthropic/claude-haiku")
+    assert out == {}
