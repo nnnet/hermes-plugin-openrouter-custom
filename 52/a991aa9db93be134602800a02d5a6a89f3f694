@@ -1,0 +1,34 @@
+tests/test_rotation.py
+  s_e5369d415d379b::t_31ecdb95f85617 126-128,131,137,148-149,152
+tests/test_rotation_e2e.py
+  s_e5369d415d379b::t_64c1fd3c0031ae 78,80-81
+  s_e5369d415d379b::t_a05f5fbc4c5702 118,121
+dashboard/dist/index.js
+  s_e5369d415d379b::t_d2ccd12bba33c2 782,788-789,794-797,802-805,810-811
+  s_e5369d415d379b::t_bcf1e99a2571c7 853-855
+  s_e5369d415d379b::t_57167b850e7acc 410
+plugin.yaml
+  s_e5369d415d379b::t_3789254638475d 3
+dashboard/manifest.json
+  s_e5369d415d379b::t_c260e8267582a5 6
+rotation.py
+  s_e5369d415d379b::t_993f7ecf119bd9 89-111,133
+  s_e5369d415d379b::t_3add92c84d77fa 179-187
+  s_e5369d415d379b::t_5fe95d03a2fc91 118-122,125-126,130-132,142-148,157,167,171-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "52a991aa9db93be134602800a02d5a6a89f3f694",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}
