@@ -1,0 +1,25 @@
+probe.py
+  s_e5369d415d379b::t_ab39914ecbcaf0 147-151,153-163
+tests/test_rotation_e2e.py
+  s_e5369d415d379b::t_bafb2317f968b2 208-211
+  s_e5369d415d379b::t_8ce42dfeaf02d2 161-165
+plugin.yaml
+  s_e5369d415d379b::t_7e0e75f9dc695f 3
+  s_e5369d415d379b::t_e347c9a7b07bb9 93-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b6ae19fbe9c9ef1dad8e7ac44aa280933839438a",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}
