@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.7.17
+version: 0.7.18
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -87,8 +87,11 @@ config:
   # content-level refusal ("I can't help with that") is success from OR's
   # perspective and is NOT retried. Detecting that requires a separate
   # in-plugin proxy and is out of scope here.
+  #
+  # CAP — OpenRouter enforces "models[] must have 3 items or fewer" at the
+  # API layer (HTTP 400 otherwise). Don't raise sequential_count above 3.
   internal_fallback:
-    sequential_count: 4
+    sequential_count: 3
 
   # Health-tracking mode — decides whether per-model health data comes
   # from passive observation only, or also from active probe pings.
