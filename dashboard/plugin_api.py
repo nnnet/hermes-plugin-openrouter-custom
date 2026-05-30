@@ -275,17 +275,23 @@ async def set_probe_enabled(payload: _ProbeEnabledPayload) -> dict:
 
 @router.post("/health/reset/single")
 async def reset_single_health(payload: _ResetSinglePayload) -> dict:
-    """Wipe a single model's row in ``health.json`` — useful when an
-    operator wants to clear a stuck circuit-open mark without losing
-    every other model's accumulated history."""
+    """Reset a single model's counters/quarantine in ``health.json`` —
+    zero out success/fail/streak and close the circuit, but keep the
+    row visible in the Health table (don't remove it). Useful when an
+    operator wants to clear a stuck quarantine without losing the
+    row's place in the UI or the history of other models."""
     from openrouter_custom import health as _hlt
     mid = (payload.model_id or "").strip()
     if not mid:
         raise HTTPException(status_code=400, detail="model_id required")
     data = _hlt.load_health(_pkg._state_dir())
-    removed = data.get("models", {}).pop(mid, None)
+    if mid in data.get("models", {}):
+        data["models"][mid] = _hlt.empty_entry()
+        existed = True
+    else:
+        existed = False
     _hlt.save_health(_pkg._state_dir(), data)
-    return {"ok": True, "removed": removed is not None, "model_id": mid}
+    return {"ok": True, "reset": existed, "model_id": mid}
 
 
 @router.post("/health/reset")
