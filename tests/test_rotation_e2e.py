@@ -131,6 +131,91 @@ def test_e2e_failover_with_health_skips_only_active_cooldowns(tmp_path: pathlib.
     assert order_after[0] == "qwen/qwen3-coder:free"
 
 
+def test_e2e_probe_auto_tune_triggers_refresh(tmp_path: pathlib.Path, monkeypatch) -> None:
+    """When top-4 of the probe pass shows < 50% success but at least one
+    success exists, probe_all calls _trigger_refresh inline.
+
+    Stubs out the OpenAI client + refresh function so we can drive the
+    decision branches without network or real refresh logic.
+    """
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    import importlib
+    import __init__ as plugin_root  # noqa: PLC0415
+    importlib.reload(plugin_root)
+    import probe as probe_mod  # noqa: PLC0415
+    importlib.reload(probe_mod)
+
+    # Stub state.json with 5 candidates so the pass has data.
+    plugin_root.save_state({
+        "candidates_top": [
+            {"id": "a:free"},
+            {"id": "b:free"},
+            {"id": "c:free"},
+            {"id": "d:free"},
+            {"id": "e:free"},
+        ],
+        "real_model_id": "a:free",
+        "pseudo_alias": "best-free",
+    })
+
+    # Stub _client to return a sentinel + _probe_one to mark top-4 mostly
+    # failing (3 fail + 1 ok = 25% < 50% threshold).
+    monkeypatch.setattr(probe_mod, "_client", lambda api_key: object())
+    plan = iter([
+        (False, "", "429"),
+        (False, "", "429"),
+        (False, "", "429"),
+        (True, "d:free", ""),
+        (True, "e:free", ""),
+    ])
+    monkeypatch.setattr(
+        probe_mod, "_probe_one",
+        lambda client, mid: next(plan),
+    )
+
+    refresh_calls = []
+    monkeypatch.setattr(
+        probe_mod, "_trigger_refresh",
+        lambda: refresh_calls.append("called"),
+    )
+
+    summary = probe_mod.probe_all(pause_min_seconds=0, pause_max_seconds=0)
+    assert summary["refresh_triggered"] is True
+    assert refresh_calls == ["called"]
+
+
+def test_e2e_probe_no_refresh_when_all_failed(tmp_path: pathlib.Path, monkeypatch) -> None:
+    """If 0/4 succeed (likely network outage), skip auto-refresh — there's
+    no upside to rewriting the same pool."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    import importlib
+    import __init__ as plugin_root  # noqa: PLC0415
+    importlib.reload(plugin_root)
+    import probe as probe_mod  # noqa: PLC0415
+    importlib.reload(probe_mod)
+
+    plugin_root.save_state({
+        "candidates_top": [{"id": "a:free"}, {"id": "b:free"}, {"id": "c:free"}, {"id": "d:free"}],
+        "real_model_id": "a:free",
+        "pseudo_alias": "best-free",
+    })
+
+    monkeypatch.setattr(probe_mod, "_client", lambda api_key: object())
+    monkeypatch.setattr(
+        probe_mod, "_probe_one",
+        lambda client, mid: (False, "", "net"),
+    )
+    refresh_calls = []
+    monkeypatch.setattr(
+        probe_mod, "_trigger_refresh",
+        lambda: refresh_calls.append("called"),
+    )
+
+    summary = probe_mod.probe_all(pause_min_seconds=0, pause_max_seconds=0)
+    assert summary["refresh_triggered"] is False
+    assert refresh_calls == []
+
+
 def test_e2e_observe_outcome_signal(tmp_path: pathlib.Path, monkeypatch) -> None:
     """Verifies the observe_outcome path that lives on the provider
     profile — same hook the conversation_loop will call live (phase 2)

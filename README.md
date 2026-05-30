@@ -55,7 +55,7 @@ config:
   max_candidates: 10
   rotation_mode: circuit_breaker # static | failover_with_health | circuit_breaker | sticky_health_weighted
   internal_fallback:
-    sequential_count: 4          # M — OR-native fallback depth (1 = off)
+    sequential_count: 4          # M — OR-native fallback depth (1 = off, see Rotation section below)
 ```
 
 ## Internal sequential fallback (M)
@@ -82,6 +82,59 @@ wrapped — the operator chose a specific id and we respect that.
 A 200 OK whose content is a content-level refusal ("I can't help with
 that") is success from OR's perspective and is NOT retried. Detecting
 that requires a separate in-plugin proxy and is out of scope.
+
+## Rotation strategies (v0.5+)
+
+The order in which candidates are sent in `models[...]` is decided by a
+configurable rotation strategy. All strategies share the same input —
+the ranked `candidates_top` from `state.json` and the per-model history
+in `health.json` — and emit an ordered list of length up to
+`internal_fallback.sequential_count`.
+
+| Mode                       | Behaviour                                                                                                |
+|----------------------------|----------------------------------------------------------------------------------------------------------|
+| `static`                   | Strict ranking order. Health is ignored. Original behaviour.                                              |
+| `failover_with_health`     | Rank order minus models whose circuit is OPEN with an unexpired cooldown. They rejoin once cooldown elapses. |
+| `circuit_breaker` (default)| Same as failover but promotes a model to slot 1 (one-shot probe) when its cooldown expires. Success closes the circuit; failure re-opens with exponential backoff `5m → 10m → 20m → 40m → 80m`. |
+| `sticky_health_weighted`   | Re-ranks every call by `rank_score × success_rate` (Beta-smoothed). Failing models drift downward without ever being binary-blocked. |
+
+### Health tracking
+
+`state/openrouter_custom/health.json` keeps per-model counters:
+
+* `success` / `fail` — running totals from probe + live conversation observations.
+* `consecutive_fail` — resets on success; circuit OPENS after 3 in a row.
+* `circuit_state` — `closed` / `open` / `half_open`.
+* `next_probe_iso` — when the next probe is allowed (during cooldown).
+* `last_error_class` — short tag for UI (`429`, `404`, `400`, `timeout`, `5xx`, `net`).
+* `last_success_iso` / `last_fail_iso` — for the dashboard's "Last ok / Last fail" columns.
+
+### Probe cron
+
+`openrouter-custom-probe` runs every 10 minutes (see
+`infra/hermes/cron-jobs.yaml`). It issues a 1-token ping with `~1s` of
+jitter between each candidate, recording the outcome. On a probe pass
+where the top-4 success rate falls below 50% **and** at least one model
+is healthy, the cron triggers an inline `state.json` refresh so the
+rotation pool can be re-ranked with newly-promoted alternatives without
+waiting for the slower 30-minute refresh tick.
+
+### Live observation (host hook)
+
+When configured for `provider=openrouter_custom`, the conversation loop
+invokes `OpenRouterCustomProfile.observe_outcome(response, error,
+request_models)` after every chat completion (streaming and non-stream).
+The hook attributes:
+
+* **Success** — to the model echoed back in `response.model` (the actual
+  id that served the request).
+* **`bypassed` failures** — to every model that appeared BEFORE the
+  responder in `request_models` (i.e. OpenRouter walked past them).
+* **Top-level errors** (RateLimitError, BadRequestError, etc.) — to
+  every model in `request_models`.
+
+The hook is opt-in: providers without an `observe_outcome` attribute
+are skipped.
 
 ### Filter semantics
 

@@ -137,9 +137,60 @@ def probe_all(
             time.sleep(random.uniform(pause_min_seconds, pause_max_seconds))
 
     _h.save_health(_state_dir(), health)
+
+    # Auto-tune: when the top-4 (rotation depth) sample shows < 50%
+    # success, the current pool is mostly unhealthy — refresh state.json
+    # inline so the next ranking can incorporate any newly-promoted
+    # candidates instead of waiting up to 30m for the regular refresh
+    # cron. Skipped when ok_count is zero (could mean network outage —
+    # refresh would just rewrite the same pool and lose nothing).
+    top_n = 4
+    top_details = details[:top_n]
+    top_ok = sum(1 for d in top_details if d.get("ok"))
+    if top_details and 0 < top_ok / len(top_details) < 0.5:
+        try:
+            _trigger_refresh()
+            return {
+                "probed": len(details),
+                "ok": ok_count,
+                "failed": fail_count,
+                "details": details,
+                "refresh_triggered": True,
+            }
+        except Exception:
+            logger.exception("auto-tune refresh failed (non-fatal)")
+
     return {
         "probed": len(details),
         "ok": ok_count,
         "failed": fail_count,
         "details": details,
+        "refresh_triggered": False,
     }
+
+
+def _trigger_refresh() -> None:
+    """Run the same refresh logic as ``refresh.py`` inline so the next
+    rotation sees a freshly-ranked pool."""
+    try:
+        from . import load_config, load_state, save_state
+        from .selector import pick_best
+    except ImportError:  # flat-module
+        from __init__ import load_config, load_state, save_state  # type: ignore[no-redef]
+        from selector import pick_best  # type: ignore[no-redef]
+    import datetime as _dt
+    cfg = load_config()
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or None
+    result = pick_best(cfg, api_key=api_key, last_state=load_state())
+    state = {
+        "last_refresh_iso": _dt.datetime.now(_dt.UTC).isoformat(),
+        "pseudo_alias": cfg.get("pseudo_model_alias", "best-free"),
+        "config_snapshot": {
+            "filters": cfg.get("filters", {}),
+            "ranking": cfg.get("ranking", {}),
+            "refresh": cfg.get("refresh", {}),
+        },
+        **result,
+    }
+    save_state(state)
+    logger.info("auto-tune refresh: alias=%s real=%s", state["pseudo_alias"], state.get("real_model_id"))

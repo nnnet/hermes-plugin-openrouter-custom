@@ -206,6 +206,55 @@ async def probe_now() -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+class _SingleProbePayload(BaseModel):
+    model_id: str
+
+
+@router.post("/probe/single")
+async def probe_single(payload: _SingleProbePayload) -> dict:
+    """Probe a single model — useful for the per-row UI button when an
+    operator wants to test recovery of one circuit-open model without
+    triggering a full pass of 10 candidates."""
+    from openrouter_custom import probe as _probe
+    from openrouter_custom import health as _hlt
+    mid = (payload.model_id or "").strip()
+    if not mid:
+        raise HTTPException(status_code=400, detail="model_id required")
+    try:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or None
+        client = _probe._client(api_key)
+        ok, actual, err = _probe._probe_one(client, mid)
+        data = _hlt.load_health(_pkg._state_dir())
+        if ok:
+            _hlt.record_success(data, mid)
+        else:
+            _hlt.record_failure(data, mid, error_class=err)
+        _hlt.save_health(_pkg._state_dir(), data)
+        return {"ok": ok, "model_id": mid, "responded": actual, "error_class": err}
+    except Exception as exc:
+        logger.exception("probe_single failed for %s", mid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+class _ResetSinglePayload(BaseModel):
+    model_id: str
+
+
+@router.post("/health/reset/single")
+async def reset_single_health(payload: _ResetSinglePayload) -> dict:
+    """Wipe a single model's row in ``health.json`` — useful when an
+    operator wants to clear a stuck circuit-open mark without losing
+    every other model's accumulated history."""
+    from openrouter_custom import health as _hlt
+    mid = (payload.model_id or "").strip()
+    if not mid:
+        raise HTTPException(status_code=400, detail="model_id required")
+    data = _hlt.load_health(_pkg._state_dir())
+    removed = data.get("models", {}).pop(mid, None)
+    _hlt.save_health(_pkg._state_dir(), data)
+    return {"ok": True, "removed": removed is not None, "model_id": mid}
+
+
 @router.post("/health/reset")
 async def reset_health() -> dict:
     """Wipe ``health.json``. Useful after changing the candidate pool or

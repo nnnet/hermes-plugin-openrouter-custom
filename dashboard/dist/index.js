@@ -201,6 +201,9 @@
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState(null);
     const [err, setErr] = useState(null);
+    // Auto-refresh: poll /state + /health every 5s. Off when the tab is
+    // hidden or when the operator turned it off via the toggle.
+    const [autoRefresh, setAutoRefresh] = useState(true);
 
     const reload = useCallback(function () {
       setBusy(true);
@@ -215,6 +218,26 @@
         .catch(function (e) { setErr(String(e && e.message || e)); })
         .finally(function () { setBusy(false); });
     }, []);
+
+    // Quiet background refresher — does NOT toggle the busy spinner,
+    // does NOT clobber the operator's in-flight config edits.
+    const quietRefresh = useCallback(function () {
+      Promise.all([api("/state"), api("/health").catch(function () { return null; })])
+        .then(function (rs) {
+          setState(rs[0] || {});
+          setHealth((rs[1] && rs[1].models) ? rs[1].models : {});
+        })
+        .catch(function () { /* swallow — main reload surfaces errors */ });
+    }, []);
+
+    useEffect(function () {
+      if (!autoRefresh) return undefined;
+      const tid = setInterval(function () {
+        if (document.hidden) return;
+        quietRefresh();
+      }, 5000);
+      return function () { clearInterval(tid); };
+    }, [autoRefresh, quietRefresh]);
 
     useEffect(reload, [reload]);
 
@@ -268,11 +291,32 @@
       setBusy(true); setMsg(null); setErr(null);
       api("/probe", { method: "POST" })
         .then(function (sum) {
-          return api("/health").then(function (h) {
-            setHealth((h && h.models) ? h.models : {});
+          return Promise.all([api("/health"), api("/state")]).then(function (rs) {
+            setHealth((rs[0] && rs[0].models) ? rs[0].models : {});
+            setState(rs[1] || {});
             setMsg(tx(t, "msg.probed",
               "Probed: {ok}/{probed} ok, {failed} failed",
               { ok: sum.ok, probed: sum.probed, failed: sum.failed }));
+          });
+        })
+        .catch(function (e) { setErr(String(e && e.message || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
+    function probeSingle(modelId) {
+      setBusy(true); setMsg(null); setErr(null);
+      api("/probe/single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_id: modelId }),
+      })
+        .then(function (r) {
+          return Promise.all([api("/health"), api("/state")]).then(function (rs) {
+            setHealth((rs[0] && rs[0].models) ? rs[0].models : {});
+            setState(rs[1] || {});
+            setMsg(tx(t, "msg.probed_single",
+              "Probed {model}: {result}",
+              { model: modelId, result: r.ok ? "OK" : ("FAIL " + (r.error_class || "?")) }));
           });
         })
         .catch(function (e) { setErr(String(e && e.message || e)); })
@@ -286,6 +330,25 @@
         .then(function () {
           setHealth({});
           setMsg(tx(t, "msg.health_reset", "Health table reset."));
+        })
+        .catch(function (e) { setErr(String(e && e.message || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
+    function resetSingle(modelId) {
+      setBusy(true); setMsg(null); setErr(null);
+      api("/health/reset/single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_id: modelId }),
+      })
+        .then(function () {
+          return Promise.all([api("/health"), api("/state")]).then(function (rs) {
+            setHealth((rs[0] && rs[0].models) ? rs[0].models : {});
+            setState(rs[1] || {});
+            setMsg(tx(t, "msg.health_reset_single",
+              "Reset {model} health.", { model: modelId }));
+          });
         })
         .catch(function (e) { setErr(String(e && e.message || e)); })
         .finally(function () { setBusy(false); });
@@ -321,7 +384,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.5.3"),
+              h(Badge, { variant: "outline" }, "v0.6.0"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -633,15 +696,24 @@
           h("div", { className: "flex items-center justify-between" },
             h(CardTitle, { className: "text-base" },
               tx(t, "section.rotation", "Rotation strategy")),
-            h("div", { className: "flex gap-2" },
+            h("div", { className: "flex gap-2 items-center" },
+              h("label", { className: "flex items-center gap-1 text-xs text-muted-foreground select-none" },
+                h("input", {
+                  type: "checkbox",
+                  checked: autoRefresh,
+                  onChange: function (e) { setAutoRefresh(e.target.checked); },
+                  className: "accent-emerald-500",
+                }),
+                tx(t, "btn.auto_refresh", "Auto 5s"),
+              ),
               h(Button, {
                 variant: "outline", size: "sm",
                 onClick: probeNow, disabled: busy,
-              }, tx(t, "btn.probe", "Probe now")),
+              }, tx(t, "btn.probe", "Probe all")),
               h(Button, {
                 variant: "ghost", size: "sm",
                 onClick: resetHealth, disabled: busy,
-              }, tx(t, "btn.reset_health", "Reset health")),
+              }, tx(t, "btn.reset_health", "Reset all")),
             ),
           ),
         ),
@@ -752,6 +824,7 @@
                     h("th", { className: "text-left px-2 py-1" }, "Last err"),
                     h("th", { className: "text-right px-2 py-1" }, "Last ok"),
                     h("th", { className: "text-right px-2 py-1" }, "Last fail"),
+                    h("th", { className: "text-right px-2 py-1" }, ""),
                   ),
                 ),
                 h("tbody", null, rows.map(function (row) {
@@ -769,6 +842,20 @@
                     h("td", { className: "px-2 py-1" }, e.last_error_class || "—"),
                     h("td", { className: "px-2 py-1 text-right" }, shortAgo(e.last_success_iso)),
                     h("td", { className: "px-2 py-1 text-right" }, shortAgo(e.last_fail_iso)),
+                    h("td", { className: "px-2 py-1 text-right whitespace-nowrap" },
+                      h("button", {
+                        title: tx(t, "tip.probe_single", "Probe just this model"),
+                        disabled: busy,
+                        onClick: function () { probeSingle(mid); },
+                        className: "text-xs text-emerald-500 hover:underline mr-2 disabled:opacity-50",
+                      }, tx(t, "btn.probe_one", "ping")),
+                      h("button", {
+                        title: tx(t, "tip.reset_single", "Wipe this model's circuit + counters"),
+                        disabled: busy,
+                        onClick: function () { resetSingle(mid); },
+                        className: "text-xs text-amber-500 hover:underline disabled:opacity-50",
+                      }, tx(t, "btn.reset_one", "reset")),
+                    ),
                   );
                 })),
               ),
