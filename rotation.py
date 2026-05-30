@@ -139,20 +139,23 @@ def _circuit_breaker(
     health: Dict[str, Any],
     max_count: int,
 ) -> List[str]:
-    """Healthy models in ranking order, then the one whose quarantine
-    just elapsed promoted to slot 1 (probe), then quarantined models at
-    the tail.
+    """Healthy models by ranking, all quarantined models at the tail.
 
-    Mid-quarantine models are pushed to the END (not dropped) so OR can
-    still try them as a last resort — we never know for sure when the
-    upstream provider recovered.
+    Unlike textbook circuit-breakers we do NOT promote a quarantined
+    model to slot 1 when its cooldown elapses — the operator's rule is
+    «quarantined go to the END». OR's server-side fallthrough acts as
+    the implicit recovery probe: when every healthy model fails, OR
+    tries the tail; a success there triggers ``observe_outcome`` ->
+    ``record_success`` which clears the quarantine. Recovery is
+    discovered organically, no forced one-shot.
 
-    Note: this function does NOT mutate health. The caller is expected to
-    do the half_open transition + record outcome separately.
+    Distinguishes itself from ``failover_with_health`` by also tracking
+    exponential backoff in ``health.py`` (5→10→20→40→80 min), which
+    delays the moment a flapping model gets out of quarantine even via
+    the OR fallthrough path.
     """
     now = _h._now()
     models = health.get("models", {})
-    half_open_probe: str | None = None
     main: List[str] = []
     quarantined: List[str] = []
     for cid in _candidate_ids(candidates):
@@ -161,41 +164,11 @@ def _circuit_breaker(
             main.append(cid)
             continue
         state = entry.get("circuit_state", _h.CIRCUIT_CLOSED)
-        if state == _h.CIRCUIT_OPEN:
-            next_probe = _h._parse_iso(entry.get("next_probe_iso"))
-            if next_probe is None or now >= next_probe:
-                # Quarantine elapsed — promote to slot 1 as probe.
-                if half_open_probe is None:
-                    half_open_probe = cid
-                continue
-            # Still in quarantine — push to tail (NOT skipped).
+        if state in (_h.CIRCUIT_OPEN, _h.CIRCUIT_HALF_OPEN):
             quarantined.append(cid)
-            continue
-        if state == _h.CIRCUIT_HALF_OPEN:
-            if half_open_probe is None:
-                half_open_probe = cid
-            continue
-        main.append(cid)
-    # Probe + main, then reserve a tail slot for quarantined just like
-    # failover_with_health. Probe slot consumes one of max_count.
-    probe_list = [half_open_probe] if half_open_probe else []
-    # Don't double-count the probe in main if somehow it ended up there.
-    main_filtered = [m for m in main if m != half_open_probe]
-    quar_filtered = [q for q in quarantined if q != half_open_probe]
-    remaining = max(max_count - len(probe_list), 1)
-    tail_part = _interleave_main_tail(main_filtered, quar_filtered, remaining)
-    ordered = probe_list + tail_part
-    # Dedup while preserving order.
-    seen: set[str] = set()
-    out: List[str] = []
-    for cid in ordered:
-        if cid in seen:
-            continue
-        seen.add(cid)
-        out.append(cid)
-        if len(out) >= max_count:
-            break
-    return out
+        else:
+            main.append(cid)
+    return _interleave_main_tail(main, quarantined, max_count)
 
 
 @_register("sticky_health_weighted")

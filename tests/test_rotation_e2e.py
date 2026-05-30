@@ -80,7 +80,7 @@ def test_e2e_circuit_breaker_demotes_then_promotes(tmp_path: pathlib.Path) -> No
     assert order_2[-1] == "qwen/qwen3-coder:free"
     assert len(order_2) == 4
 
-    # ── PHASE 3: cooldown elapsed → probe slot ────────────────────
+    # ── PHASE 3: cooldown elapsed → still at the tail ───────────────
     fresh = h.load_health(tmp_path)
     # Manually expire the cooldown by pushing next_probe into the past.
     fresh["models"]["qwen/qwen3-coder:free"]["next_probe_iso"] = (
@@ -89,9 +89,10 @@ def test_e2e_circuit_breaker_demotes_then_promotes(tmp_path: pathlib.Path) -> No
     h.save_health(tmp_path, fresh)
 
     order_3 = r.request_order("circuit_breaker", cands, h.load_health(tmp_path), 4)
-    # circuit_breaker promotes the due-probe model to slot 1.
-    assert order_3[0] == "qwen/qwen3-coder:free"
-    assert order_3[1] == "deepseek/deepseek-v4-flash:free"
+    # v0.7.7: no probe-promotion — quarantined stays at the tail. OR's
+    # fallthrough will probe it organically when healthy ones fail.
+    assert order_3[0] == "deepseek/deepseek-v4-flash:free"
+    assert order_3[-1] == "qwen/qwen3-coder:free"
 
     # ── PHASE 4: probe SUCCEEDS → circuit closes ──────────────────
     after_probe = h.load_health(tmp_path)

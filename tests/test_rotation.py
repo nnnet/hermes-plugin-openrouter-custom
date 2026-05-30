@@ -138,27 +138,30 @@ def test_failover_with_health_includes_expired_cooldown() -> None:
     assert out == ["a", "b", "c"]
 
 
-def test_circuit_breaker_promotes_due_probe_to_front() -> None:
+def test_circuit_breaker_quarantined_at_tail_regardless_of_cooldown() -> None:
+    """v0.7.7: removed probe-promotion. Quarantined (OPEN) models live
+    at the tail even if their cooldown has elapsed — OR's server-side
+    fallthrough acts as the implicit recovery probe instead of us
+    force-promoting to slot 1."""
+    # Cooldown elapsed
     health = {"models": {"b": _open_circuit_entry(-60)}}
     out = r.request_order("circuit_breaker", _cand("a", "b", "c"), health, 5)
-    # b's probe is due → promoted to front
-    assert out == ["b", "a", "c"]
-
-
-def test_circuit_breaker_moves_active_quarantine_to_tail() -> None:
-    """v0.7.4: quarantined models pushed to tail instead of being skipped."""
+    assert out == ["a", "c", "b"]
+    # Cooldown active
     health = {"models": {"a": _open_circuit_entry(600)}}
     out = r.request_order("circuit_breaker", _cand("a", "b", "c"), health, 5)
     assert out == ["b", "c", "a"]
 
 
-def test_circuit_breaker_handles_half_open() -> None:
+def test_circuit_breaker_half_open_also_at_tail() -> None:
+    """HALF_OPEN entries (typically set by an external probe) behave
+    identically to OPEN — they sit at the tail until a success closes
+    them via ``record_success``."""
     e = h.empty_entry()
     e["circuit_state"] = h.CIRCUIT_HALF_OPEN
     health = {"models": {"c": e}}
     out = r.request_order("circuit_breaker", _cand("a", "b", "c"), health, 5)
-    # c is half_open → promoted to front
-    assert out == ["c", "a", "b"]
+    assert out == ["a", "b", "c"]
 
 
 def test_sticky_health_weighted_demotes_failing() -> None:

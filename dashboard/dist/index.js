@@ -407,7 +407,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.7.6"),
+              h(Badge, { variant: "outline" }, "v0.7.7"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -799,10 +799,12 @@
                 h("span", { className: "font-courier text-emerald-500" }, "circuit_breaker"),
                 " — ",
                 tx(t, "rotation.help.circuit_breaker",
-                  "Same as failover_with_health, plus: when a model's quarantine " +
-                  "timer expires it is promoted to slot 1 (one-shot probe). " +
-                  "Success → quarantine cleared. Failure → quarantine extended " +
-                  "with exponential backoff: 5 → 10 → 20 → 40 → 80 minutes.")),
+                  "Same as failover_with_health, plus exponential-backoff " +
+                  "quarantine timer (5 → 10 → 20 → 40 → 80 minutes). " +
+                  "Quarantined models stay at the tail regardless of timer " +
+                  "expiry; OR's server-side fallthrough is the implicit " +
+                  "recovery probe — if the model answers OK when OR tries " +
+                  "it last, quarantine clears automatically.")),
               h("div", null,
                 h("span", { className: "font-courier text-emerald-500" }, "sticky_health_weighted"),
                 " — ",
