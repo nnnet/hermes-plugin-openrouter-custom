@@ -37,7 +37,21 @@ CIRCUIT_OPEN = "open"
 CIRCUIT_HALF_OPEN = "half_open"
 
 # Exponential backoff sequence in seconds: 5m, 10m, 20m, 40m, 80m capped.
+# Callers (probe.probe_all, __init__.observe_outcome) can override per
+# call by passing ``backoff_ladder=`` to ``record_failure``; the
+# config field ``quarantine_backoff_minutes`` controls operator-tunable
+# values without touching code.
 BACKOFF_LADDER = [300, 600, 1200, 2400, 4800]
+
+# Number of consecutive failures before circuit opens (= the model is
+# placed in quarantine). Per-call override via the keyword arg of the
+# same name; operator-tunable via ``quarantine_consecutive_fail_threshold``.
+DEFAULT_OPEN_AT_CONSECUTIVE = 3
+
+# Default smoothing prior count for ``success_rate``. Bumped via
+# ``health_success_rate_smoothing`` in config when callers want a
+# different prior strength.
+DEFAULT_SUCCESS_RATE_SMOOTHING = 1
 
 
 def _now() -> datetime.datetime:
@@ -140,11 +154,21 @@ def record_failure(
     model_id: str,
     error_class: str = "",
     *,
-    open_at_consecutive: int = 3,
+    open_at_consecutive: int | None = None,
+    backoff_ladder: list[int] | None = None,
 ) -> None:
     """Mutate ``data`` to record a failure. Opens the circuit after
     ``open_at_consecutive`` consecutive failures and schedules the next
-    probe via exponential backoff."""
+    probe via exponential backoff.
+
+    Both threshold and ladder are configurable; falls back to module
+    defaults when caller passes ``None``."""
+    threshold = int(open_at_consecutive) if open_at_consecutive is not None else DEFAULT_OPEN_AT_CONSECUTIVE
+    threshold = max(threshold, 1)
+    ladder = list(backoff_ladder) if backoff_ladder else BACKOFF_LADDER
+    if not ladder:
+        ladder = BACKOFF_LADDER
+
     e = get_entry(data, model_id)
     e["fail"] = int(e.get("fail", 0)) + 1
     e["consecutive_fail"] = int(e.get("consecutive_fail", 0)) + 1
@@ -152,11 +176,11 @@ def record_failure(
     if error_class:
         e["last_error_class"] = str(error_class)[:32]
     cf = e["consecutive_fail"]
-    if cf >= open_at_consecutive:
+    if cf >= threshold:
         # Pick backoff slot based on how many times we've opened.
-        # We approximate via cf - open_at_consecutive (0,1,2,...).
-        slot = min(cf - open_at_consecutive, len(BACKOFF_LADDER) - 1)
-        backoff = BACKOFF_LADDER[max(slot, 0)]
+        # We approximate via cf - threshold (0,1,2,...).
+        slot = min(cf - threshold, len(ladder) - 1)
+        backoff = int(ladder[max(slot, 0)])
         e["circuit_state"] = CIRCUIT_OPEN
         e["next_probe_iso"] = _iso(_now() + datetime.timedelta(seconds=backoff))
         e["backoff_seconds"] = backoff
@@ -187,15 +211,21 @@ def transition_half_open_if_due(
     return True
 
 
-def success_rate(entry: Dict[str, Any], smoothing: int = 1) -> float:
+def success_rate(entry: Dict[str, Any], smoothing: int | None = None) -> float:
     """Beta-smoothed success rate. ``smoothing`` adds priors so brand-new
     models don't get a 0/0 = NaN problem.
 
     A fresh model with smoothing=1 starts at 50% (1 prior success, 1 prior
     fail). After 10 successes it's 11/12 ≈ 0.92.
+
+    Defaults to :data:`DEFAULT_SUCCESS_RATE_SMOOTHING` when None;
+    operators can change it via the ``health_success_rate_smoothing``
+    config field.
     """
-    s = int(entry.get("success", 0)) + smoothing
-    f = int(entry.get("fail", 0)) + smoothing
+    sm = int(smoothing) if smoothing is not None else DEFAULT_SUCCESS_RATE_SMOOTHING
+    sm = max(sm, 1)
+    s = int(entry.get("success", 0)) + sm
+    f = int(entry.get("fail", 0)) + sm
     return s / (s + f)
 
 

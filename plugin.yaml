@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.7.13
+version: 0.7.14
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -96,4 +96,50 @@ config:
   # probes would burn free-tier quota for nothing). UI toggles this
   # under the Rotation card.
   probe_enabled: true
+
+  # Per-call HTTP timeout for probe requests. Free-tier upstreams may
+  # take several seconds to respond — keep this short enough that a
+  # dead upstream doesn't block the dashboard UI for the full probe
+  # pass, but long enough to accommodate a slow-but-responsive provider.
+  probe_timeout_seconds: 8
+  # OpenAI SDK retries are turned off — single-probe semantics. Raise
+  # to a small N if you accept the extra latency for transient retries.
+  probe_max_retries: 0
+  # Random pause between successive probes in a full pass. Light jitter
+  # avoids slamming OpenRouter free-tier with 10 simultaneous requests
+  # (which itself trips rate limits and pollutes the health signal).
+  probe_jitter_min_seconds: 0.5
+  probe_jitter_max_seconds: 1.5
+  # Auto-tune: when fewer than this fraction of the top-N probes succeed,
+  # trigger an immediate refresh of state.json so the next ranking can
+  # incorporate freshly-promoted candidates from the OR catalog.
+  probe_auto_tune_top_n: 4
+  probe_auto_tune_success_rate: 0.5
+  # Minimal payload sent in each probe — keep tiny to avoid free-tier
+  # token-budget churn.
+  probe_prompt: "ping"
+  probe_max_tokens: 1
+  probe_temperature: 0.0
+  # Override the OpenRouter base URL when proxying through a corporate
+  # gateway (leave empty/null to use the default
+  # https://openrouter.ai/api/v1).
+  probe_base_url: null
+
+  # Quarantine — health-tracking policy applied by record_failure.
+  # consecutive_fail_threshold: how many in-a-row failures before a
+  # model gets pushed to the tail of rotation. Raise for noisier
+  # upstreams, lower for stricter pools.
+  quarantine_consecutive_fail_threshold: 3
+  # Backoff ladder in MINUTES — successive quarantine durations after
+  # each re-failed probe. After the last entry the duration caps.
+  quarantine_backoff_minutes: [5, 10, 20, 40, 80]
+
+  # In-memory alias-session cache (persisted to alias_sessions.json).
+  # Caps disk growth — raise for high-traffic deployments where many
+  # parallel sessions hit the alias path.
+  alias_sessions_max: 500
+
+  # Beta-smoothing prior count for ``success_rate`` (sticky_health_weighted
+  # ranking). Bigger = newcomers anchored closer to 50% for longer.
+  health_success_rate_smoothing: 1
 

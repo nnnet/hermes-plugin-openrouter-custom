@@ -160,7 +160,7 @@ def test_e2e_probe_auto_tune_triggers_refresh(tmp_path: pathlib.Path, monkeypatc
 
     # Stub _client to return a sentinel + _probe_one to mark top-4 mostly
     # failing (3 fail + 1 ok = 25% < 50% threshold).
-    monkeypatch.setattr(probe_mod, "_client", lambda api_key: object())
+    monkeypatch.setattr(probe_mod, "_client", lambda api_key, **_kw: object())
     plan = iter([
         (False, "", "429"),
         (False, "", "429"),
@@ -170,7 +170,7 @@ def test_e2e_probe_auto_tune_triggers_refresh(tmp_path: pathlib.Path, monkeypatc
     ])
     monkeypatch.setattr(
         probe_mod, "_probe_one",
-        lambda client, mid: next(plan),
+        lambda client, mid, **_kw: next(plan),
     )
 
     refresh_calls = []
@@ -200,10 +200,10 @@ def test_e2e_probe_no_refresh_when_all_failed(tmp_path: pathlib.Path, monkeypatc
         "pseudo_alias": "best-free",
     })
 
-    monkeypatch.setattr(probe_mod, "_client", lambda api_key: object())
+    monkeypatch.setattr(probe_mod, "_client", lambda api_key, **_kw: object())
     monkeypatch.setattr(
         probe_mod, "_probe_one",
-        lambda client, mid: (False, "", "net"),
+        lambda client, mid, **_kw: (False, "", "net"),
     )
     refresh_calls = []
     monkeypatch.setattr(
@@ -236,7 +236,7 @@ def test_e2e_probe_skipped_when_disabled(tmp_path: pathlib.Path, monkeypatch) ->
     # because OpenAI() is being called with no key — so the test would
     # fail loudly. Early return means we never touch _client.
     called = {"n": 0}
-    def _boom(api_key):
+    def _boom(api_key, **_kw):
         called["n"] += 1
         raise AssertionError("probe should not have called _client")
     monkeypatch.setattr(probe_mod, "_client", _boom)

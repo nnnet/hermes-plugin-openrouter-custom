@@ -30,33 +30,68 @@ except ImportError:  # flat-module for tests / scripts
 logger = logging.getLogger(__name__)
 
 
-def _client(api_key: str | None):
+# Defaults — used only when load_config() doesn't provide a value or
+# returns None. Each is exposed as a top-level field in plugin.yaml so
+# operators can tune without touching code.
+DEFAULT_PROBE_TIMEOUT_SECONDS = 8.0
+DEFAULT_PROBE_MAX_RETRIES = 0
+DEFAULT_PROBE_JITTER_MIN_SECONDS = 0.5
+DEFAULT_PROBE_JITTER_MAX_SECONDS = 1.5
+DEFAULT_PROBE_AUTO_TUNE_TOP_N = 4
+DEFAULT_PROBE_AUTO_TUNE_SUCCESS_RATE = 0.5
+DEFAULT_PROBE_PROMPT = "ping"
+DEFAULT_PROBE_MAX_TOKENS = 1
+DEFAULT_PROBE_TEMPERATURE = 0.0
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _client(
+    api_key: str | None,
+    *,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
+    base_url: str | None = None,
+):
     """Build a transient OpenAI client pointed at OpenRouter."""
     try:
         from openai import OpenAI  # type: ignore[import-not-found]
     except ImportError as exc:
         raise RuntimeError("openai sdk not installed inside this Python") from exc
+    t = float(timeout_seconds) if timeout_seconds is not None else DEFAULT_PROBE_TIMEOUT_SECONDS
+    r = int(max_retries) if max_retries is not None else DEFAULT_PROBE_MAX_RETRIES
     return OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=(base_url or DEFAULT_OPENROUTER_BASE_URL),
         api_key=(api_key or os.environ.get("OPENROUTER_API_KEY", "") or "").strip(),
-        timeout=8.0,
-        max_retries=0,  # don't retry inside the SDK — UI single-probe is one-shot
+        timeout=max(t, 1.0),
+        max_retries=max(r, 0),
     )
 
 
-def _probe_one(client: Any, model_id: str) -> tuple[bool, str, str]:
-    """Issue a 1-token ping to ``model_id``.
+def _probe_one(
+    client: Any,
+    model_id: str,
+    *,
+    prompt: str | None = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+) -> tuple[bool, str, str]:
+    """Issue a minimal ping to ``model_id``.
 
     Returns ``(ok, responded_model, error_class)``. ``responded_model``
     is the model OR echoed in the response (may differ from the request
     when OR routes internally).
+
+    Payload knobs (prompt / max_tokens / temperature) come from config
+    via probe_all; the keyword fallbacks here are used only by direct
+    callers (e.g. the per-row UI ``ping`` button via the
+    ``/probe/single`` endpoint).
     """
     try:
         rsp = client.chat.completions.create(
             model=model_id,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-            temperature=0.0,
+            messages=[{"role": "user", "content": str(prompt or DEFAULT_PROBE_PROMPT)}],
+            max_tokens=int(max_tokens if max_tokens is not None else DEFAULT_PROBE_MAX_TOKENS),
+            temperature=float(temperature if temperature is not None else DEFAULT_PROBE_TEMPERATURE),
         )
     except Exception as exc:
         # Best-effort error classification. Order matters: pick the most
@@ -90,8 +125,8 @@ def probe_all(
     *,
     api_key: str | None = None,
     max_candidates: int | None = None,
-    pause_min_seconds: float = 0.5,
-    pause_max_seconds: float = 1.5,
+    pause_min_seconds: float | None = None,
+    pause_max_seconds: float | None = None,
 ) -> Dict[str, Any]:
     """Run probes against every model in state.json:candidates_top.
 
@@ -116,12 +151,28 @@ def probe_all(
     if cfg.get("probe_enabled") is False:
         return {"probed": 0, "ok": 0, "failed": 0, "details": [], "skipped": True}
 
+    # All knobs come from config; fallbacks land in DEFAULT_* constants
+    # at module top so nothing magic is hidden in this body.
+    timeout_cfg = cfg.get("probe_timeout_seconds")
+    retries_cfg = cfg.get("probe_max_retries")
+    base_url_cfg = cfg.get("probe_base_url")
+    jitter_min = pause_min_seconds if pause_min_seconds is not None \
+        else float(cfg.get("probe_jitter_min_seconds", DEFAULT_PROBE_JITTER_MIN_SECONDS) or 0)
+    jitter_max = pause_max_seconds if pause_max_seconds is not None \
+        else float(cfg.get("probe_jitter_max_seconds", DEFAULT_PROBE_JITTER_MAX_SECONDS) or 0)
+    prompt = str(cfg.get("probe_prompt") or DEFAULT_PROBE_PROMPT)
+    max_toks = int(cfg.get("probe_max_tokens") or DEFAULT_PROBE_MAX_TOKENS)
+    temp = float(cfg.get("probe_temperature") if cfg.get("probe_temperature") is not None else DEFAULT_PROBE_TEMPERATURE)
+    quarantine_threshold = int(cfg.get("quarantine_consecutive_fail_threshold", _h.DEFAULT_OPEN_AT_CONSECUTIVE) or _h.DEFAULT_OPEN_AT_CONSECUTIVE)
+    backoff_minutes = cfg.get("quarantine_backoff_minutes")
+    backoff_ladder = [int(m) * 60 for m in backoff_minutes] if isinstance(backoff_minutes, list) and backoff_minutes else None
+
     state = load_state()
     candidates: List[Dict[str, Any]] = list(state.get("candidates_top") or [])
     if max_candidates and max_candidates > 0:
         candidates = candidates[:max_candidates]
 
-    client = _client(api_key)
+    client = _client(api_key, timeout_seconds=timeout_cfg, max_retries=retries_cfg, base_url=base_url_cfg)
     health = _h.load_health(_state_dir())
 
     details: List[Dict[str, Any]] = []
@@ -132,30 +183,36 @@ def probe_all(
         cid = str((c or {}).get("id") or "").strip()
         if not cid:
             continue
-        ok, actual, err = _probe_one(client, cid)
+        ok, actual, err = _probe_one(client, cid, prompt=prompt, max_tokens=max_toks, temperature=temp)
         if ok:
             _h.record_success(health, cid)
             ok_count += 1
             details.append({"id": cid, "ok": True, "responded": actual, "error_class": ""})
         else:
-            _h.record_failure(health, cid, error_class=err)
+            _h.record_failure(
+                health, cid, error_class=err,
+                open_at_consecutive=quarantine_threshold,
+                backoff_ladder=backoff_ladder,
+            )
             fail_count += 1
             details.append({"id": cid, "ok": False, "responded": "", "error_class": err})
-        if pause_max_seconds > 0:
-            time.sleep(random.uniform(pause_min_seconds, pause_max_seconds))
+        if jitter_max > 0:
+            time.sleep(random.uniform(jitter_min, jitter_max))
 
     _h.save_health(_state_dir(), health)
 
-    # Auto-tune: when the top-4 (rotation depth) sample shows < 50%
-    # success, the current pool is mostly unhealthy — refresh state.json
-    # inline so the next ranking can incorporate any newly-promoted
-    # candidates instead of waiting up to 30m for the regular refresh
-    # cron. Skipped when ok_count is zero (could mean network outage —
-    # refresh would just rewrite the same pool and lose nothing).
-    top_n = 4
-    top_details = details[:top_n]
+    # Auto-tune: when the top-N (config: probe_auto_tune_top_n) sample
+    # shows < probe_auto_tune_success_rate success, the current pool is
+    # mostly unhealthy — refresh state.json inline so the next ranking
+    # can incorporate any newly-promoted candidates instead of waiting
+    # for the regular refresh cron. Skipped when ok_count is zero
+    # (likely a network outage — refresh would just rewrite the same
+    # pool and lose nothing).
+    top_n = int(cfg.get("probe_auto_tune_top_n", DEFAULT_PROBE_AUTO_TUNE_TOP_N) or DEFAULT_PROBE_AUTO_TUNE_TOP_N)
+    success_threshold = float(cfg.get("probe_auto_tune_success_rate", DEFAULT_PROBE_AUTO_TUNE_SUCCESS_RATE) or DEFAULT_PROBE_AUTO_TUNE_SUCCESS_RATE)
+    top_details = details[:max(top_n, 1)]
     top_ok = sum(1 for d in top_details if d.get("ok"))
-    if top_details and 0 < top_ok / len(top_details) < 0.5:
+    if top_details and 0 < top_ok / len(top_details) < success_threshold:
         try:
             _trigger_refresh()
             return {

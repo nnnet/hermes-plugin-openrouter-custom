@@ -82,18 +82,30 @@ def load_alias_sessions() -> set[str]:
     return set()
 
 
+DEFAULT_ALIAS_SESSIONS_MAX = 500
+
+
 def save_alias_sessions(sessions: set[str]) -> None:
-    """Atomic write of ``_alias_sessions`` to disk. Capped at last 500
-    entries (LRU-ish — we keep insertion order via list).
+    """Atomic write of ``_alias_sessions`` to disk. Capped at the last
+    ``alias_sessions_max`` entries from config (default 500); the cap
+    bounds disk growth — operators raise it for high-traffic deployments,
+    lower it for embedded ones.
 
     Best-effort: any IO failure (including parent mkdir failure on
     read-only filesystems used in unit tests) is swallowed because the
     in-memory set still works for the current process.
     """
     try:
+        cap = DEFAULT_ALIAS_SESSIONS_MAX
+        try:
+            cap_cfg = load_config().get("alias_sessions_max")
+            if cap_cfg is not None:
+                cap = max(int(cap_cfg), 1)
+        except Exception:
+            pass
         fp = alias_sessions_file()
         fp.parent.mkdir(parents=True, exist_ok=True)
-        capped = list(sessions)[-500:]
+        capped = list(sessions)[-cap:]
         tmp = fp.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(capped, ensure_ascii=False))
         tmp.replace(fp)
@@ -409,12 +421,30 @@ if ProviderProfile is not None:
             data = _hlt.load_health(_state_dir())
             req = list(request_models or [])
 
+            # Quarantine knobs from config — fall back to module
+            # defaults when missing so existing deployments keep working.
+            cfg = load_config()
+            qthr = cfg.get("quarantine_consecutive_fail_threshold")
+            backoff_minutes = cfg.get("quarantine_backoff_minutes")
+            backoff_ladder = (
+                [int(m) * 60 for m in backoff_minutes]
+                if isinstance(backoff_minutes, list) and backoff_minutes
+                else None
+            )
+
+            def _fail(cid: str, klass: str) -> None:
+                _hlt.record_failure(
+                    data, cid, error_class=klass,
+                    open_at_consecutive=int(qthr) if qthr is not None else None,
+                    backoff_ladder=backoff_ladder,
+                )
+
             if error is not None:
                 # Top-level error → every requested model is considered
                 # failed for this turn (OR couldn't satisfy any).
                 tag = type(error).__name__[:24]
                 for cid in req:
-                    _hlt.record_failure(data, cid, error_class=tag)
+                    _fail(cid, tag)
                 _hlt.save_health(_state_dir(), data)
                 return
 
@@ -427,7 +457,7 @@ if ProviderProfile is not None:
             if req and actual in req:
                 idx = req.index(actual)
                 for cid in req[:idx]:
-                    _hlt.record_failure(data, cid, error_class="bypassed")
+                    _fail(cid, "bypassed")
                 _hlt.record_success(data, actual)
             elif req:
                 # Responder not in requested list (e.g. OR auto-route).
