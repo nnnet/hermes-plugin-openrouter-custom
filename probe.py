@@ -144,22 +144,15 @@ def probe_all(
           "details": [{"id":"qwen/...","ok":true,"error_class":""}, ...]
         }
     """
-    # Early-out conditions:
-    #   1. health_mode == observe_outcome — passive collection only,
-    #      probes are unconditionally off (no extra OR quota burn).
-    #   2. probe_enabled is False — operator switch in observe_prob
-    #      mode.
+    # Single gate: only ``health_mode=observe_prob`` runs the probe
+    # cron. Passive mode (observe_outcome) returns immediately with no
+    # OR-quota usage.
     cfg = load_config()
     mode = str(cfg.get("health_mode") or "observe_outcome").strip().lower()
     if mode != "observe_prob":
         return {
             "probed": 0, "ok": 0, "failed": 0, "details": [],
             "skipped": True, "reason": "health_mode=" + mode,
-        }
-    if cfg.get("probe_enabled") is not True:
-        return {
-            "probed": 0, "ok": 0, "failed": 0, "details": [],
-            "skipped": True, "reason": "probe_enabled=false",
         }
 
     # All knobs come from config; fallbacks land in DEFAULT_* constants

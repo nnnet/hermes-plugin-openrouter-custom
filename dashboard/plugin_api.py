@@ -240,8 +240,8 @@ class _ResetSinglePayload(BaseModel):
     model_id: str
 
 
-class _ProbeEnabledPayload(BaseModel):
-    enabled: bool
+class _HealthModePayload(BaseModel):
+    mode: str  # "observe_outcome" | "observe_prob"
 
 
 @router.get("/meta")
@@ -267,20 +267,23 @@ async def meta() -> dict:
         return {"name": "", "version": "?", "kind": "", "error": str(exc)}
 
 
-@router.get("/probe-enabled")
-async def get_probe_enabled() -> dict:
-    """Return the current probe-enabled flag (cfg.probe_enabled)."""
+@router.get("/health-mode")
+async def get_health_mode() -> dict:
+    """Return the current ``health_mode`` from effective config."""
     cfg = _pkg.load_config()
-    val = cfg.get("probe_enabled")
-    # plugin.yaml default is True; missing key is treated as enabled.
-    return {"enabled": val is not False}
+    mode = str(cfg.get("health_mode") or "observe_outcome").strip().lower()
+    return {"mode": mode}
 
 
-@router.put("/probe-enabled")
-async def set_probe_enabled(payload: _ProbeEnabledPayload) -> dict:
-    """Toggle ``probe_enabled`` in the overrides file. Hot — next
-    ``probe_all`` call reads the new value via ``load_config``."""
+@router.put("/health-mode")
+async def set_health_mode(payload: _HealthModePayload) -> dict:
+    """Switch between passive (observe_outcome) and active (observe_prob)
+    health collection. The change is hot — next ``probe_all`` reads
+    it via ``load_config``."""
     import yaml as _yaml
+    mode = str(payload.mode or "").strip().lower()
+    if mode not in {"observe_outcome", "observe_prob"}:
+        raise HTTPException(status_code=400, detail="mode must be observe_outcome or observe_prob")
     ofile = _pkg.overrides_file()
     ofile.parent.mkdir(parents=True, exist_ok=True)
     current: dict = {}
@@ -289,11 +292,14 @@ async def set_probe_enabled(payload: _ProbeEnabledPayload) -> dict:
             current = _yaml.safe_load(ofile.read_text()) or {}
         except Exception:
             current = {}
-    current["probe_enabled"] = bool(payload.enabled)
+    current["health_mode"] = mode
+    # Drop the now-removed probe_enabled key if it leaked into an older
+    # overrides file.
+    current.pop("probe_enabled", None)
     tmp = ofile.with_suffix(".yaml.tmp")
     tmp.write_text(_yaml.safe_dump(current, sort_keys=False, allow_unicode=True))
     tmp.replace(ofile)
-    return {"ok": True, "enabled": bool(payload.enabled)}
+    return {"ok": True, "mode": mode}
 
 
 @router.post("/health/reset/single")

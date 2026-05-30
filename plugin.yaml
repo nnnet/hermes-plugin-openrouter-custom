@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.7.16
+version: 0.7.17
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -106,13 +106,11 @@ config:
   #                    6 × top-K requests/hour against your OR quota.
   #                    Use only with paid credits (≥$10 unlocks the
   #                    1000/day cap; 20 req/min cap still applies).
+  #
+  # Note: ``probe_enabled`` is no longer a separate flag (was redundant
+  # — health_mode alone fully expresses the kill-switch). To run the
+  # probe cron, set health_mode: observe_prob.
   health_mode: observe_outcome
-
-  # Probe — periodic 1-token pings to every top-K candidate. In
-  # observe_outcome mode it is forced off regardless of this flag. In
-  # observe_prob mode the cron runs only when this is true; flip via
-  # the Rotation card after switching the mode.
-  probe_enabled: false
 
   # Per-call HTTP timeout for probe requests. Free-tier upstreams may
   # take several seconds to respond — keep this short enough that a

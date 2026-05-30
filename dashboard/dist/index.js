@@ -198,7 +198,7 @@
     const [config, setConfig] = useState(null);
     const [state, setState] = useState(null);
     const [health, setHealth] = useState(null);
-    const [probeEnabled, setProbeEnabled] = useState(true);
+    const [healthMode, setHealthMode] = useState("observe_outcome");
     // Plugin meta (name, version) — single source of truth lives in
     // plugin.yaml; UI fetches it via /meta so we never duplicate the
     // version string in JS or manifest.json.
@@ -216,7 +216,7 @@
         api("/config"),
         api("/state"),
         api("/health").catch(function () { return null; }),
-        api("/probe-enabled").catch(function () { return { enabled: true }; }),
+        api("/health-mode").catch(function () { return { mode: "observe_outcome" }; }),
         api("/meta").catch(function () { return { version: "" }; }),
       ])
         .then(function (results) {
@@ -224,7 +224,7 @@
           setConfig(deepClone(results[0].config || {}));
           setState(results[1] || {});
           setHealth((results[2] && results[2].models) ? results[2].models : {});
-          setProbeEnabled(results[3] && results[3].enabled !== false);
+          setHealthMode((results[3] && results[3].mode) || "observe_outcome");
           setMeta(results[4] || { version: "" });
           setErr(null);
         })
@@ -348,17 +348,17 @@
         .finally(function () { setBusy(false); });
     }
 
-    function toggleProbeEnabled(next) {
+    function setMode(next) {
       setBusy(true); setMsg(null); setErr(null);
-      api("/probe-enabled", {
+      api("/health-mode", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: next }),
+        body: JSON.stringify({ mode: next }),
       })
         .then(function () {
-          setProbeEnabled(next);
-          setMsg(tx(t, "msg.probe_toggled",
-            "Probe {state}", { state: next ? "enabled" : "disabled" }));
+          setHealthMode(next);
+          setMsg(tx(t, "msg.mode_changed",
+            "Mode: {mode}", { mode: next }));
         })
         .catch(function (e) { setErr(String(e && e.message || e)); })
         .finally(function () { setBusy(false); });
@@ -743,21 +743,23 @@
               ),
               h("label", {
                 className: "flex items-center gap-1 text-xs text-muted-foreground select-none",
-                title: tx(t, "tip.probe_enabled",
-                  "Disable to save free-tier quota when nothing is using the alias"),
+                title: tx(t, "tip.health_mode",
+                  "observe_outcome — passive (live traffic only). observe_prob — active (adds probe cron, burns OR quota)."),
               },
-                h("input", {
-                  type: "checkbox",
-                  checked: probeEnabled,
-                  onChange: function (e) { toggleProbeEnabled(e.target.checked); },
+                tx(t, "btn.health_mode", "Mode"),
+                h("select", {
+                  value: healthMode,
+                  onChange: function (e) { setMode(e.target.value); },
                   disabled: busy,
-                  className: "accent-emerald-500",
-                }),
-                tx(t, "btn.probe_enabled", "Probe enabled"),
+                  className: "border border-border bg-background/40 px-2 py-0.5 text-xs",
+                },
+                  h("option", { value: "observe_outcome" }, "observe_outcome (passive)"),
+                  h("option", { value: "observe_prob" },    "observe_prob (active)"),
+                ),
               ),
               h(Button, {
                 variant: "outline", size: "sm",
-                onClick: probeNow, disabled: busy || !probeEnabled,
+                onClick: probeNow, disabled: busy || healthMode !== "observe_prob",
               }, tx(t, "btn.probe", "Probe all")),
               h(Button, {
                 variant: "ghost", size: "sm",
