@@ -53,8 +53,9 @@ config:
     on_failure: keep_last        # keep_last | rotate | fallback_static
     fallback_static_id: qwen/qwen3-coder:free
   max_candidates: 10
+  rotation_mode: circuit_breaker # static | failover_with_health | circuit_breaker | sticky_health_weighted
   internal_fallback:
-    sequential_count: 1          # M — OR-native fallback depth (1 = off)
+    sequential_count: 4          # M — OR-native fallback depth (1 = off)
 ```
 
 ## Internal sequential fallback (M)

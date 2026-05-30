@@ -88,9 +88,33 @@ def _read_state() -> dict:
     try:
         import json
         with open(p) as f:
-            return json.load(f) or {}
+            data = json.load(f) or {}
     except Exception:
         return {}
+    # Augment with the rotation-strategy preview so the UI's candidate
+    # pool can show position numbers without re-implementing the
+    # strategies in JS. Computed live from current config + health, so
+    # changes show up on the next /state poll (Save / Refresh / Probe
+    # all trigger a reload).
+    try:
+        from openrouter_custom import health as _hlt
+        from openrouter_custom import rotation as _rot
+        cfg = _pkg.load_config()
+        mode = cfg.get("rotation_mode") or "static"
+        try:
+            m = int((cfg.get("internal_fallback") or {}).get("sequential_count", 1) or 1)
+        except (TypeError, ValueError):
+            m = 1
+        m = max(1, m)
+        health = _hlt.load_health(_pkg._state_dir())
+        order = _rot.request_order(mode, data.get("candidates_top") or [], health, m)
+        data["next_request_order"] = order
+        data["rotation_mode_effective"] = _rot.normalize_mode(mode)
+        data["internal_fallback_depth_effective"] = m
+    except Exception:  # never let UI break because of preview computation
+        logger.exception("next_request_order computation failed")
+        data["next_request_order"] = []
+    return data
 
 
 # ── pydantic models ────────────────────────────────────────────────────────

@@ -321,7 +321,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.5.0"),
+              h(Badge, { variant: "outline" }, "v0.5.1"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -767,26 +767,45 @@
             diverged = true; break;
           }
         }
+        // Build model_id → 1-based position map from the server-computed
+        // next_request_order so we can fill the "Order" column. The list
+        // is rotation_mode aware and reflects current health.json. Empty
+        // cell for models not in the rotation slice (i.e. beyond
+        // sequential_count or excluded by the strategy).
+        const reqOrder = state.next_request_order || [];
+        const orderMap = {};
+        for (let i = 0; i < reqOrder.length; i++) {
+          orderMap[reqOrder[i]] = i + 1;
+        }
+        const rotMode = state.rotation_mode_effective || "static";
+        const rotDepth = state.internal_fallback_depth_effective || reqOrder.length;
         return h(Card, null,
           h(CardHeader, null,
             h("div", { className: "flex items-center justify-between gap-3" },
               h(CardTitle, { className: "text-base" },
                 tx(t, "section.pool", "Current candidate pool")),
-              diverged && h(Badge, { variant: "outline" },
-                tx(t, "pool.live_rerank_badge", "live re-rank (unsaved)")),
+              h("div", { className: "flex gap-2 items-center" },
+                h(Badge, { variant: "outline" },
+                  "rotation: " + rotMode + " / depth=" + rotDepth),
+                diverged && h(Badge, { variant: "outline" },
+                  tx(t, "pool.live_rerank_badge", "live re-rank (unsaved)")),
+              ),
             ),
           ),
           h(CardContent, { className: "flex flex-col gap-2" },
             h("p", { className: "text-xs text-muted-foreground" },
               tx(t, "pool.order_hint",
-                "Sorted client-side using the Ranking section above — " +
-                "changes update instantly. ★ marks the model currently " +
-                "behind the alias in state.json; it only moves when you " +
-                "press Save + Refresh now, so after editing Ranking the " +
-                "star may not be at the top of this list until then.")),
+                "Sorted client-side using the Ranking section above. " +
+                "★ marks the alias's current real id from state.json — " +
+                "moves only on Save + Refresh. The \"Req\" column shows " +
+                "the 1-based position each model occupies in the NEXT " +
+                "OR request based on rotation_mode + health.json; empty " +
+                "= not in the rotation slice. Updates on Save / Refresh / " +
+                "Probe.")),
             h("table", { className: "w-full text-sm font-courier" },
               h("thead", null, h("tr", { className: "text-muted-foreground" },
                 h("th", { className: "text-left py-1" }, tx(t, "pool.rank", "#")),
+                h("th", { className: "text-left py-1" }, tx(t, "pool.req", "Req")),
                 h("th", { className: "text-left py-1" }, tx(t, "pool.model", "Model")),
                 h("th", { className: "text-right py-1" }, tx(t, "pool.params", "Params")),
                 h("th", { className: "text-right py-1" }, tx(t, "pool.context", "Context")),
@@ -797,11 +816,15 @@
               )),
               h("tbody", null, liveRanked.map(function (c, idx) {
                 const isPick = c.id === state.real_model_id;
+                const reqPos = orderMap[c.id];
                 return h("tr", {
                   key: c.id,
                   className: isPick ? "bg-emerald-500/10" : "",
                 },
                   h("td", { className: "py-1 text-muted-foreground" }, idx + 1),
+                  h("td", {
+                    className: "py-1 " + (reqPos ? "text-emerald-500 font-bold" : "text-muted-foreground"),
+                  }, reqPos ? String(reqPos) : ""),
                   h("td", { className: "py-1" }, (isPick ? "★ " : "  ") + c.id),
                   h("td", { className: "py-1 text-right" }, c.params_display || "—"),
                   h("td", { className: "py-1 text-right" }, c.context_length),

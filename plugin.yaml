@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.5.0
+version: 0.5.1
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -55,7 +55,7 @@ config:
   # All non-static modes consult ``state/openrouter_custom/health.json``
   # which is populated by the openrouter-custom-probe cron (default 10m)
   # and, in a future patch, by live observation of conversation outcomes.
-  rotation_mode: static
+  rotation_mode: circuit_breaker
 
   # Refresh schedule for the cron job that picks the best candidate.
   refresh:
@@ -88,5 +88,5 @@ config:
   # perspective and is NOT retried. Detecting that requires a separate
   # in-plugin proxy and is out of scope here.
   internal_fallback:
-    sequential_count: 1
+    sequential_count: 4
 
