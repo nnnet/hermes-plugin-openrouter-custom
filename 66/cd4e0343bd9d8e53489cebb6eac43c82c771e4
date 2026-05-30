@@ -1,0 +1,19 @@
+README.md
+  s_e5369d415d379b::t_b78242cfbdfcb0 3-4,6-7,16,18-20,25-30,33-36,40-43,50-51,56,58,62-63,65,67-89,92-168,172-233,237-280,288-295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "66cd4e0343bd9d8e53489cebb6eac43c82c771e4",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}
