@@ -321,7 +321,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.5.2"),
+              h(Badge, { variant: "outline" }, "v0.5.3"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -697,9 +697,30 @@
             ),
           ),
           health && Object.keys(health).length > 0 && (function () {
+            // Sort order for the Health table:
+            //   1. Models that are in the current next_request_order, in
+            //      their request position (1..M). Reads like a leaderboard.
+            //   2. Models with OPEN circuit (currently blocked).
+            //   3. Everyone else, alphabetically.
+            const reqOrderH = state && state.next_request_order || [];
+            const reqPos = {};
+            for (let i = 0; i < reqOrderH.length; i++) reqPos[reqOrderH[i]] = i + 1;
             const rows = Object.keys(health).map(function (mid) {
               return [mid, health[mid] || {}];
-            }).sort(function (a, b) { return a[0] < b[0] ? -1 : 1; });
+            }).sort(function (a, b) {
+              const pa = reqPos[a[0]] || 0;
+              const pb = reqPos[b[0]] || 0;
+              if (pa && pb) return pa - pb;
+              if (pa) return -1;
+              if (pb) return 1;
+              const sa = (a[1] && a[1].circuit_state) || "closed";
+              const sb = (b[1] && b[1].circuit_state) || "closed";
+              if (sa !== sb) {
+                if (sa === "open") return -1;
+                if (sb === "open") return 1;
+              }
+              return a[0] < b[0] ? -1 : 1;
+            });
             function shortAgo(iso) {
               if (!iso) return "—";
               const t0 = Date.parse(iso);
@@ -722,6 +743,7 @@
               h("table", { className: "w-full text-xs font-courier" },
                 h("thead", { className: "text-muted-foreground" },
                   h("tr", null,
+                    h("th", { className: "text-left px-2 py-1" }, "Req"),
                     h("th", { className: "text-left px-2 py-1" }, "Model"),
                     h("th", { className: "text-right px-2 py-1" }, "✓"),
                     h("th", { className: "text-right px-2 py-1" }, "✗"),
@@ -734,7 +756,11 @@
                 ),
                 h("tbody", null, rows.map(function (row) {
                   const mid = row[0]; const e = row[1];
+                  const rp = reqPos[mid];
                   return h("tr", { key: mid, className: "border-t border-border/30" },
+                    h("td", {
+                      className: "px-2 py-1 " + (rp ? "text-emerald-500 font-bold" : "text-muted-foreground"),
+                    }, rp ? String(rp) : ""),
                     h("td", { className: "px-2 py-1" }, mid),
                     h("td", { className: "px-2 py-1 text-right" }, e.success || 0),
                     h("td", { className: "px-2 py-1 text-right" }, e.fail || 0),

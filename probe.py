@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 from typing import Any, Dict, List
 
@@ -57,18 +58,28 @@ def _probe_one(client: Any, model_id: str) -> tuple[bool, str, str]:
             temperature=0.0,
         )
     except Exception as exc:
-        # Best-effort error classification.
+        # Best-effort error classification. Order matters: pick the most
+        # specific signal first.
         name = type(exc).__name__
         msg = str(exc)
+        msg_l = msg.lower()
         klass = name
-        if "429" in msg:
+        # Status-coded HTTP exceptions from openai SDK have integer code:
+        status_code = getattr(exc, "status_code", None)
+        if status_code == 429 or "429" in msg or "rate limit" in msg_l:
             klass = "429"
-        elif "404" in msg:
+        elif status_code == 404 or "404" in msg:
             klass = "404"
-        elif "timeout" in msg.lower() or "timed out" in msg.lower():
+        elif status_code == 400 or "BadRequest" in name:
+            klass = "400"
+        elif status_code == 401 or "unauthorized" in msg_l or "401" in msg:
+            klass = "401"
+        elif "timeout" in msg_l or "timed out" in msg_l:
             klass = "timeout"
-        elif "5" in name and "Error" in name and name.startswith(("5", "50")):
+        elif status_code and 500 <= int(status_code) < 600:
             klass = "5xx"
+        elif "connection" in msg_l or "ConnectError" in name:
+            klass = "net"
         return False, "", klass[:24]
     actual = str(getattr(rsp, "model", "") or "").strip() or model_id
     return True, actual, ""
@@ -78,9 +89,15 @@ def probe_all(
     *,
     api_key: str | None = None,
     max_candidates: int | None = None,
-    pause_seconds: float = 0.25,
+    pause_min_seconds: float = 0.5,
+    pause_max_seconds: float = 1.5,
 ) -> Dict[str, Any]:
     """Run probes against every model in state.json:candidates_top.
+
+    Light jitter (``pause_min_seconds..pause_max_seconds`` between
+    probes) avoids hammering OpenRouter's free-tier with 10 simultaneous
+    requests, which itself trips rate limits and pollutes our health
+    signal. With defaults: ~5-15s total for 10 candidates.
 
     Returns a summary dict::
 
@@ -116,8 +133,8 @@ def probe_all(
             _h.record_failure(health, cid, error_class=err)
             fail_count += 1
             details.append({"id": cid, "ok": False, "responded": "", "error_class": err})
-        if pause_seconds > 0:
-            time.sleep(pause_seconds)
+        if pause_max_seconds > 0:
+            time.sleep(random.uniform(pause_min_seconds, pause_max_seconds))
 
     _h.save_health(_state_dir(), health)
     return {
