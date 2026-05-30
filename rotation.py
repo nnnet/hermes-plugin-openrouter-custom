@@ -109,18 +109,28 @@ def _interleave_main_tail(main: List[str], tail: List[str], max_count: int) -> L
     return out[:max_count]
 
 
-@_register("failover_with_health")
-def _failover_with_health(
+def _classify_for_rotation(
     candidates: List[Dict[str, Any]],
     health: Dict[str, Any],
-    max_count: int,
-) -> List[str]:
-    """Rank order; models in quarantine (OPEN circuit, cooldown not yet
-    elapsed) move to the TAIL of the list.  They're not excluded — OR
-    will still try them last after the healthy ones fail, because we
-    can't be sure the quarantine state still reflects reality and we
-    don't want to throw away a potentially-recovered top model."""
-    now = _h._now()
+    now,
+) -> tuple[List[str], List[str]]:
+    """Split candidate ids into two groups, preserving ranking order:
+
+    * **main** — entries that should appear at their ranking slot. This
+      includes healthy models AND models in the «probe» phase (their
+      quarantine cooldown has elapsed but state hasn't yet been mutated
+      to closed by a successful call, or they're explicitly half_open).
+      A probe entry is given a second chance at its natural rank — if
+      it answers OK during the next request, ``record_success`` will
+      mutate state to closed.
+
+    * **tail** — entries still in active quarantine (OPEN + cooldown
+      not yet elapsed). They go to the END of the rotation list.
+
+    The badge logic in the dashboard mirrors this split: «🚫 quarantined»
+    for tail, «⚠ probe» for main entries that are in the recovery
+    phase, normal badges for fully healthy ones.
+    """
     models = health.get("models", {})
     main: List[str] = []
     tail: List[str] = []
@@ -130,6 +140,21 @@ def _failover_with_health(
             tail.append(cid)
         else:
             main.append(cid)
+    return main, tail
+
+
+@_register("failover_with_health")
+def _failover_with_health(
+    candidates: List[Dict[str, Any]],
+    health: Dict[str, Any],
+    max_count: int,
+) -> List[str]:
+    """Models in ranking order; quarantined ones (OPEN circuit with
+    cooldown still active) move to the END of the list. When a model's
+    quarantine timer expires it returns to its ranking slot as «probe»
+    — a single failed call there will re-quarantine it; success will
+    clear it."""
+    main, tail = _classify_for_rotation(candidates, health, _h._now())
     return _interleave_main_tail(main, tail, max_count)
 
 
@@ -139,36 +164,16 @@ def _circuit_breaker(
     health: Dict[str, Any],
     max_count: int,
 ) -> List[str]:
-    """Healthy models by ranking, all quarantined models at the tail.
+    """Same list layout as failover_with_health: probe-ready models at
+    their ranking slot, actively quarantined ones at the tail.
 
-    Unlike textbook circuit-breakers we do NOT promote a quarantined
-    model to slot 1 when its cooldown elapses — the operator's rule is
-    «quarantined go to the END». OR's server-side fallthrough acts as
-    the implicit recovery probe: when every healthy model fails, OR
-    tries the tail; a success there triggers ``observe_outcome`` ->
-    ``record_success`` which clears the quarantine. Recovery is
-    discovered organically, no forced one-shot.
-
-    Distinguishes itself from ``failover_with_health`` by also tracking
-    exponential backoff in ``health.py`` (5→10→20→40→80 min), which
-    delays the moment a flapping model gets out of quarantine even via
-    the OR fallthrough path.
+    Distinguishes itself from ``failover_with_health`` by tracking
+    exponential backoff in ``health.py`` (5→10→20→40→80 minutes) so a
+    flapping model spends progressively longer in quarantine before
+    the next probe attempt.
     """
-    now = _h._now()
-    models = health.get("models", {})
-    main: List[str] = []
-    quarantined: List[str] = []
-    for cid in _candidate_ids(candidates):
-        entry = models.get(cid)
-        if not entry:
-            main.append(cid)
-            continue
-        state = entry.get("circuit_state", _h.CIRCUIT_CLOSED)
-        if state in (_h.CIRCUIT_OPEN, _h.CIRCUIT_HALF_OPEN):
-            quarantined.append(cid)
-        else:
-            main.append(cid)
-    return _interleave_main_tail(main, quarantined, max_count)
+    main, tail = _classify_for_rotation(candidates, health, _h._now())
+    return _interleave_main_tail(main, tail, max_count)
 
 
 @_register("sticky_health_weighted")

@@ -407,7 +407,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.7.7"),
+              h(Badge, { variant: "outline" }, "v0.7.8"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -791,20 +791,21 @@
                 h("span", { className: "font-courier text-emerald-500" }, "failover_with_health"),
                 " — ",
                 tx(t, "rotation.help.failover_with_health",
-                  "Models go by ranking. Those quarantined (after 3 consecutive " +
-                  "errors) are sent LAST in the list — OR tries them only if the " +
-                  "healthy ones fail. When the quarantine timer expires, the " +
-                  "model returns to its ranking slot.")),
+                  "Models go by ranking. After 3 consecutive errors a model " +
+                  "is quarantined and pushed to the END of the list — OR " +
+                  "tries it only if every healthy one fails. When the " +
+                  "quarantine timer expires, state becomes «probe» and the " +
+                  "model returns to its ranking slot for a recovery attempt. " +
+                  "Success clears quarantine; failure re-arms it.")),
               h("div", null,
                 h("span", { className: "font-courier text-emerald-500" }, "circuit_breaker"),
                 " — ",
                 tx(t, "rotation.help.circuit_breaker",
-                  "Same as failover_with_health, plus exponential-backoff " +
-                  "quarantine timer (5 → 10 → 20 → 40 → 80 minutes). " +
-                  "Quarantined models stay at the tail regardless of timer " +
-                  "expiry; OR's server-side fallthrough is the implicit " +
-                  "recovery probe — if the model answers OK when OR tries " +
-                  "it last, quarantine clears automatically.")),
+                  "Same layout as failover_with_health (probe → ranking slot, " +
+                  "quarantine → tail). Adds exponential-backoff timer in " +
+                  "health.py: each failed probe extends quarantine to " +
+                  "5 → 10 → 20 → 40 → 80 minutes, so flapping models get " +
+                  "fewer chances.")),
               h("div", null,
                 h("span", { className: "font-courier text-emerald-500" }, "sticky_health_weighted"),
                 " — ",
@@ -852,8 +853,18 @@
             }
             function stateBadge(e) {
               const s = (e && e.circuit_state) || "closed";
-              if (s === "open")      return h("span", { className: "text-red-500 font-courier" }, "🚫 quarantined");
-              if (s === "half_open") return h("span", { className: "text-amber-500 font-courier" }, "⚠ probing");
+              if (s === "half_open") return h("span", { className: "text-amber-500 font-courier" }, "⚠ probe");
+              if (s === "open") {
+                // Differentiate true quarantine (cooldown active → at
+                // tail) from probe phase (cooldown elapsed → back to
+                // its ranking slot, awaiting recovery attempt).
+                const nextProbe = (e && e.next_probe_iso) || null;
+                const nowMs = Date.now();
+                const probeMs = nextProbe ? Date.parse(nextProbe) : 0;
+                if (!nextProbe || isNaN(probeMs) || probeMs <= nowMs)
+                  return h("span", { className: "text-amber-500 font-courier" }, "⚠ probe");
+                return h("span", { className: "text-red-500 font-courier" }, "🚫 quarantined");
+              }
               // "closed" alone doesn't mean the model is good — it just
               // means we haven't hit the 3-consec-fail threshold to
               // quarantine it. Differentiate by actual history so the

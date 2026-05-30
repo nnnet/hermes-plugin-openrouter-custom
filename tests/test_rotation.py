@@ -123,40 +123,37 @@ def test_static_caps_at_max_count() -> None:
     assert out == ["a", "b"]
 
 
-def test_failover_with_health_moves_quarantined_to_tail() -> None:
-    """Quarantined model (OPEN, cooldown active) is pushed to the END,
-    not excluded. OR can still try it after the healthy ones fail."""
+def test_failover_with_health_quarantined_at_tail() -> None:
+    """Cooldown ACTIVE → model is in quarantine → pushed to the END."""
     health = {"models": {"a": _open_circuit_entry(60)}}
     out = r.request_order("failover_with_health", _cand("a", "b", "c"), health, 5)
     assert out == ["b", "c", "a"]
 
 
-def test_failover_with_health_includes_expired_cooldown() -> None:
+def test_failover_with_health_probe_returns_to_ranking_slot() -> None:
+    """Cooldown ELAPSED → «probe» phase → returns to its ranking slot
+    (not promoted to slot 1, not stuck at tail)."""
     health = {"models": {"a": _open_circuit_entry(-60)}}
     out = r.request_order("failover_with_health", _cand("a", "b", "c"), health, 5)
-    # Cooldown elapsed → no longer blocked → returns to its ranking slot.
     assert out == ["a", "b", "c"]
 
 
-def test_circuit_breaker_quarantined_at_tail_regardless_of_cooldown() -> None:
-    """v0.7.7: removed probe-promotion. Quarantined (OPEN) models live
-    at the tail even if their cooldown has elapsed — OR's server-side
-    fallthrough acts as the implicit recovery probe instead of us
-    force-promoting to slot 1."""
-    # Cooldown elapsed
-    health = {"models": {"b": _open_circuit_entry(-60)}}
-    out = r.request_order("circuit_breaker", _cand("a", "b", "c"), health, 5)
-    assert out == ["a", "c", "b"]
-    # Cooldown active
+def test_circuit_breaker_same_layout_as_failover() -> None:
+    """v0.7.8: circuit_breaker has the same list layout as
+    failover_with_health. Difference is in health.py (exp backoff)."""
+    # Active cooldown → tail
     health = {"models": {"a": _open_circuit_entry(600)}}
     out = r.request_order("circuit_breaker", _cand("a", "b", "c"), health, 5)
     assert out == ["b", "c", "a"]
+    # Elapsed cooldown → probe → back to ranking slot
+    health = {"models": {"b": _open_circuit_entry(-60)}}
+    out = r.request_order("circuit_breaker", _cand("a", "b", "c"), health, 5)
+    assert out == ["a", "b", "c"]
 
 
-def test_circuit_breaker_half_open_also_at_tail() -> None:
-    """HALF_OPEN entries (typically set by an external probe) behave
-    identically to OPEN — they sit at the tail until a success closes
-    them via ``record_success``."""
+def test_circuit_breaker_half_open_at_ranking_slot() -> None:
+    """HALF_OPEN entries are treated as «probe» — back to their natural
+    ranking slot, not pinned to slot 1."""
     e = h.empty_entry()
     e["circuit_state"] = h.CIRCUIT_HALF_OPEN
     health = {"models": {"c": e}}
