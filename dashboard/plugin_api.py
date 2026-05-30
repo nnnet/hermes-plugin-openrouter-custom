@@ -240,6 +240,39 @@ class _ResetSinglePayload(BaseModel):
     model_id: str
 
 
+class _ProbeEnabledPayload(BaseModel):
+    enabled: bool
+
+
+@router.get("/probe-enabled")
+async def get_probe_enabled() -> dict:
+    """Return the current probe-enabled flag (cfg.probe_enabled)."""
+    cfg = _pkg.load_config()
+    val = cfg.get("probe_enabled")
+    # plugin.yaml default is True; missing key is treated as enabled.
+    return {"enabled": val is not False}
+
+
+@router.put("/probe-enabled")
+async def set_probe_enabled(payload: _ProbeEnabledPayload) -> dict:
+    """Toggle ``probe_enabled`` in the overrides file. Hot — next
+    ``probe_all`` call reads the new value via ``load_config``."""
+    import yaml as _yaml
+    ofile = _pkg.overrides_file()
+    ofile.parent.mkdir(parents=True, exist_ok=True)
+    current: dict = {}
+    if ofile.exists():
+        try:
+            current = _yaml.safe_load(ofile.read_text()) or {}
+        except Exception:
+            current = {}
+    current["probe_enabled"] = bool(payload.enabled)
+    tmp = ofile.with_suffix(".yaml.tmp")
+    tmp.write_text(_yaml.safe_dump(current, sort_keys=False, allow_unicode=True))
+    tmp.replace(ofile)
+    return {"ok": True, "enabled": bool(payload.enabled)}
+
+
 @router.post("/health/reset/single")
 async def reset_single_health(payload: _ResetSinglePayload) -> dict:
     """Wipe a single model's row in ``health.json`` — useful when an

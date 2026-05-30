@@ -216,6 +216,37 @@ def test_e2e_probe_no_refresh_when_all_failed(tmp_path: pathlib.Path, monkeypatc
     assert refresh_calls == []
 
 
+def test_e2e_probe_skipped_when_disabled(tmp_path: pathlib.Path, monkeypatch) -> None:
+    """When ``cfg.probe_enabled`` is False, probe_all returns immediately
+    without issuing any HTTP request — saves OR free-tier quota when the
+    operator is not using the alias."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    import importlib
+    import __init__ as plugin_root
+    importlib.reload(plugin_root)
+    import probe as probe_mod
+    importlib.reload(probe_mod)
+
+    monkeypatch.setattr(
+        probe_mod, "load_config",
+        lambda: {"probe_enabled": False},
+    )
+
+    # If probe_all does NOT early-return, this lambda would explode
+    # because OpenAI() is being called with no key — so the test would
+    # fail loudly. Early return means we never touch _client.
+    called = {"n": 0}
+    def _boom(api_key):
+        called["n"] += 1
+        raise AssertionError("probe should not have called _client")
+    monkeypatch.setattr(probe_mod, "_client", _boom)
+
+    summary = probe_mod.probe_all()
+    assert summary["skipped"] is True
+    assert summary["probed"] == 0
+    assert called["n"] == 0
+
+
 def test_e2e_observe_outcome_signal(tmp_path: pathlib.Path, monkeypatch) -> None:
     """Verifies the observe_outcome path that lives on the provider
     profile — same hook the conversation_loop will call live (phase 2)

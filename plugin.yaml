@@ -1,6 +1,6 @@
 name: openrouter_custom
 kind: model-provider
-version: 0.6.0
+version: 0.7.0
 description: |
   OpenRouter live-catalog filter with stable pseudo-model alias.
   Periodically fetches /api/v1/models, filters by free/context/tools/modality,
@@ -89,4 +89,11 @@ config:
   # in-plugin proxy and is out of scope here.
   internal_fallback:
     sequential_count: 4
+
+  # Probe — periodic 1-token pings to every top-K candidate that drive
+  # the rotation strategies' health data. Disable when the system is
+  # not using the alias (no session is being routed through rotation —
+  # probes would burn free-tier quota for nothing). UI toggles this
+  # under the Rotation card.
+  probe_enabled: true
 

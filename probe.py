@@ -22,10 +22,10 @@ from typing import Any, Dict, List
 
 try:  # package-style
     from . import health as _h
-    from . import _state_dir, load_state
+    from . import _state_dir, load_state, load_config
 except ImportError:  # flat-module for tests / scripts
     import health as _h  # type: ignore[no-redef]
-    from __init__ import _state_dir, load_state  # type: ignore[no-redef]
+    from __init__ import _state_dir, load_state, load_config  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,13 @@ def probe_all(
           "details": [{"id":"qwen/...","ok":true,"error_class":""}, ...]
         }
     """
+    # Early-out when probe is disabled in config. The operator turns it
+    # off when no traffic is using the alias (no rotation = no point
+    # spending OR's free-tier quota on probes).
+    cfg = load_config()
+    if cfg.get("probe_enabled") is False:
+        return {"probed": 0, "ok": 0, "failed": 0, "details": [], "skipped": True}
+
     state = load_state()
     candidates: List[Dict[str, Any]] = list(state.get("candidates_top") or [])
     if max_candidates and max_candidates > 0:
@@ -156,6 +163,7 @@ def probe_all(
                 "failed": fail_count,
                 "details": details,
                 "refresh_triggered": True,
+                "skipped": False,
             }
         except Exception:
             logger.exception("auto-tune refresh failed (non-fatal)")
@@ -166,6 +174,7 @@ def probe_all(
         "failed": fail_count,
         "details": details,
         "refresh_triggered": False,
+        "skipped": False,
     }
 
 

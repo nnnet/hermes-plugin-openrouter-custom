@@ -59,6 +59,48 @@ def state_file() -> Path:
     return _state_dir() / "state.json"
 
 
+def alias_sessions_file() -> Path:
+    """Where ``_alias_sessions`` is persisted so the marker survives
+    gateway restarts.  Capped at 500 entries (most recent kept) to
+    bound file growth — a session_id stays in memory ~1 day in normal
+    Hermes use, more than long enough for a hundred turns of context."""
+    return _state_dir() / "alias_sessions.json"
+
+
+def load_alias_sessions() -> set[str]:
+    """Read the persisted alias-session set. Returns empty set on any
+    error or missing file."""
+    fp = alias_sessions_file()
+    if not fp.exists():
+        return set()
+    try:
+        data = json.loads(fp.read_text())
+        if isinstance(data, list):
+            return {str(x) for x in data if x}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return set()
+
+
+def save_alias_sessions(sessions: set[str]) -> None:
+    """Atomic write of ``_alias_sessions`` to disk. Capped at last 500
+    entries (LRU-ish — we keep insertion order via list).
+
+    Best-effort: any IO failure (including parent mkdir failure on
+    read-only filesystems used in unit tests) is swallowed because the
+    in-memory set still works for the current process.
+    """
+    try:
+        fp = alias_sessions_file()
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        capped = list(sessions)[-500:]
+        tmp = fp.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(capped, ensure_ascii=False))
+        tmp.replace(fp)
+    except OSError:
+        pass
+
+
 def overrides_file() -> Path:
     """Mutable config overrides file written by the dashboard plugin UI.
 
@@ -182,21 +224,33 @@ if ProviderProfile is not None:
         # Set of session_ids whose ``resolve_runtime_model`` matched the
         # pseudo alias.  ``build_extra_body`` reads this to decide whether
         # to inject the OR-native ``models: [...]`` sequential-fallback
-        # array.  Membership is per-process and ephemeral — sessions
-        # forgotten on gateway restart, which is fine because Hermes
-        # re-resolves on the next turn.
-        _alias_sessions: set[str] = set()
+        # array.  Persisted to disk so the marker survives gateway
+        # restarts (without persistence, the first TG turn after restart
+        # falls through to no-rotation because the in-memory set is
+        # empty).
+        _alias_sessions: set[str] | None = None  # lazy-loaded
+
+        @classmethod
+        def _ensure_loaded(cls) -> set[str]:
+            if cls._alias_sessions is None:
+                cls._alias_sessions = load_alias_sessions()
+            return cls._alias_sessions
 
         @classmethod
         def _mark_alias_session(cls, session_id: object) -> None:
             sid = str(session_id or "")
-            if sid:
-                cls._alias_sessions.add(sid)
+            if not sid:
+                return
+            sessions = cls._ensure_loaded()
+            if sid in sessions:
+                return  # avoid spurious disk write on repeat hits
+            sessions.add(sid)
+            save_alias_sessions(sessions)
 
         @classmethod
         def _is_alias_session(cls, session_id: object) -> bool:
             sid = str(session_id or "")
-            return bool(sid) and sid in cls._alias_sessions
+            return bool(sid) and sid in cls._ensure_loaded()
 
         def resolve_runtime_model(self, model: str, **_context: object) -> str:  # type: ignore[override]
             """Swap the pseudo alias for the current real id from state.json.
@@ -254,6 +308,14 @@ if ProviderProfile is not None:
             empty dict and the request goes through as a single-model
             call.
             """
+            # Pure alias-marker semantics: rotation activates ONLY when
+            # the session was resolved from the pseudo alias (set by
+            # resolve_runtime_model). When the operator pinned a
+            # concrete model via /model, no marker is set and rotation
+            # stays off — the operator's explicit pick is respected and
+            # OR is not asked to fall through other ids.
+            if not self._is_alias_session(session_id):
+                return {}
             cfg = load_config()
             internal = cfg.get("internal_fallback") or {}
             try:
@@ -264,23 +326,6 @@ if ProviderProfile is not None:
                 return {}
             state = load_state()
             candidates = state.get("candidates_top") or []
-            candidate_ids = {
-                str((c or {}).get("id") or "").strip()
-                for c in candidates
-                if (c or {}).get("id")
-            }
-            # Two paths into rotation:
-            # 1. Session was alias-resolved this run (resolve_runtime_model
-            #    marked us). Original behaviour.
-            # 2. The current model is in our candidates_top pool — covers
-            #    the common case where the operator picked ``best-free``
-            #    via /model, the picker saved the RESOLVED real id (not the
-            #    alias) to sessions.db, and subsequent turns see a concrete
-            #    model that nevertheless lives inside our rotation pool.
-            current_model = str(context.get("model") or "").strip()
-            in_pool = bool(current_model) and current_model in candidate_ids
-            if not (self._is_alias_session(session_id) or in_pool):
-                return {}
 
             # Rotation: consult the configured strategy + current health.
             try:

@@ -198,6 +198,7 @@
     const [config, setConfig] = useState(null);
     const [state, setState] = useState(null);
     const [health, setHealth] = useState(null);
+    const [probeEnabled, setProbeEnabled] = useState(true);
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState(null);
     const [err, setErr] = useState(null);
@@ -207,12 +208,18 @@
 
     const reload = useCallback(function () {
       setBusy(true);
-      Promise.all([api("/config"), api("/state"), api("/health").catch(function () { return null; })])
+      Promise.all([
+        api("/config"),
+        api("/state"),
+        api("/health").catch(function () { return null; }),
+        api("/probe-enabled").catch(function () { return { enabled: true }; }),
+      ])
         .then(function (results) {
           setDefaults(results[0].defaults || {});
           setConfig(deepClone(results[0].config || {}));
           setState(results[1] || {});
           setHealth((results[2] && results[2].models) ? results[2].models : {});
+          setProbeEnabled(results[3] && results[3].enabled !== false);
           setErr(null);
         })
         .catch(function (e) { setErr(String(e && e.message || e)); })
@@ -335,6 +342,22 @@
         .finally(function () { setBusy(false); });
     }
 
+    function toggleProbeEnabled(next) {
+      setBusy(true); setMsg(null); setErr(null);
+      api("/probe-enabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      })
+        .then(function () {
+          setProbeEnabled(next);
+          setMsg(tx(t, "msg.probe_toggled",
+            "Probe {state}", { state: next ? "enabled" : "disabled" }));
+        })
+        .catch(function (e) { setErr(String(e && e.message || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
     function resetSingle(modelId) {
       setBusy(true); setMsg(null); setErr(null);
       api("/health/reset/single", {
@@ -384,7 +407,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.6.0"),
+              h(Badge, { variant: "outline" }, "v0.7.0"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -405,8 +428,14 @@
               h("div", { className: "font-courier" }, (state && state.pseudo_alias) || get(["pseudo_model_alias"], "best-free")),
             ),
             h("div", null,
-              h("div", { className: "text-muted-foreground" }, tx(t, "summary.routes_to", "Currently routes to")),
-              h("div", { className: "font-courier" }, (state && state.real_model_id) || tx(t, "summary.no_state", "(no state — run Refresh now)")),
+              h("div", { className: "text-muted-foreground" }, tx(t, "summary.next_req", "Next request starts with")),
+              h("div", { className: "font-courier" },
+                (state && state.next_request_order && state.next_request_order[0])
+                  || tx(t, "summary.no_next",
+                    "(rotation off — no live candidates or operator pinned a concrete model)")),
+              h("div", { className: "text-xs text-muted-foreground mt-1" },
+                tx(t, "summary.next_req_hint",
+                  "Computed live from rotation_mode + health.json. Updates on Save / Refresh / Probe / TG turn. Empty when rotation is inactive.")),
             ),
             h("div", null,
               h("div", { className: "text-muted-foreground" }, tx(t, "summary.candidates", "Candidate count")),
@@ -706,9 +735,23 @@
                 }),
                 tx(t, "btn.auto_refresh", "Auto 5s"),
               ),
+              h("label", {
+                className: "flex items-center gap-1 text-xs text-muted-foreground select-none",
+                title: tx(t, "tip.probe_enabled",
+                  "Disable to save free-tier quota when nothing is using the alias"),
+              },
+                h("input", {
+                  type: "checkbox",
+                  checked: probeEnabled,
+                  onChange: function (e) { toggleProbeEnabled(e.target.checked); },
+                  disabled: busy,
+                  className: "accent-emerald-500",
+                }),
+                tx(t, "btn.probe_enabled", "Probe enabled"),
+              ),
               h(Button, {
                 variant: "outline", size: "sm",
-                onClick: probeNow, disabled: busy,
+                onClick: probeNow, disabled: busy || !probeEnabled,
               }, tx(t, "btn.probe", "Probe all")),
               h(Button, {
                 variant: "ghost", size: "sm",
@@ -909,12 +952,13 @@
             h("p", { className: "text-xs text-muted-foreground" },
               tx(t, "pool.order_hint",
                 "Sorted client-side using the Ranking section above. " +
-                "★ marks the alias's current real id from state.json — " +
-                "moves only on Save + Refresh. The \"Req\" column shows " +
-                "the 1-based position each model occupies in the NEXT " +
-                "OR request based on rotation_mode + health.json; empty " +
-                "= not in the rotation slice. Updates on Save / Refresh / " +
-                "Probe.")),
+                "The \"Req\" column shows live rotation order based on " +
+                "rotation_mode + current health.json. Empty Req = excluded " +
+                "by the strategy (e.g. circuit OPEN with active cooldown). " +
+                "The Req=1 row is highlighted — that's where the next OR " +
+                "request actually starts. When the operator pins a " +
+                "concrete model via /model (not the alias), rotation " +
+                "deactivates and the Req column is empty for every row.")),
             h("table", { className: "w-full text-sm font-courier" },
               h("thead", null, h("tr", { className: "text-muted-foreground" },
                 h("th", { className: "text-left py-1" }, tx(t, "pool.rank", "#")),
@@ -928,17 +972,17 @@
                 h("th", { className: "text-right py-1" }, tx(t, "pool.price_out", "$/M out")),
               )),
               h("tbody", null, liveRanked.map(function (c, idx) {
-                const isPick = c.id === state.real_model_id;
                 const reqPos = orderMap[c.id];
+                const isReq1 = reqPos === 1;
                 return h("tr", {
                   key: c.id,
-                  className: isPick ? "bg-emerald-500/10" : "",
+                  className: isReq1 ? "bg-emerald-500/10" : "",
                 },
                   h("td", { className: "py-1 text-muted-foreground" }, idx + 1),
                   h("td", {
                     className: "py-1 " + (reqPos ? "text-emerald-500 font-bold" : "text-muted-foreground"),
                   }, reqPos ? String(reqPos) : ""),
-                  h("td", { className: "py-1" }, (isPick ? "★ " : "  ") + c.id),
+                  h("td", { className: "py-1" }, c.id),
                   h("td", { className: "py-1 text-right" }, c.params_display || "—"),
                   h("td", { className: "py-1 text-right" }, c.context_length),
                   h("td", { className: "py-1 text-right" }, c.supports_tools ? "✓" : "—"),
