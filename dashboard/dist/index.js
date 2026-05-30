@@ -407,7 +407,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.7.4"),
+              h(Badge, { variant: "outline" }, "v0.7.5"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -852,7 +852,20 @@
               const s = (e && e.circuit_state) || "closed";
               if (s === "open")      return h("span", { className: "text-red-500 font-courier" }, "🚫 quarantined");
               if (s === "half_open") return h("span", { className: "text-amber-500 font-courier" }, "⚠ probing");
-              return h("span", { className: "text-emerald-500 font-courier" }, "✓ healthy");
+              // "closed" alone doesn't mean the model is good — it just
+              // means we haven't hit the 3-consec-fail threshold to
+              // quarantine it. Differentiate by actual history so the
+              // label doesn't lie when last_ok is empty.
+              const succ = (e && e.success) || 0;
+              const fail = (e && e.fail) || 0;
+              const cf = (e && e.consecutive_fail) || 0;
+              if (succ === 0 && fail === 0)
+                return h("span", { className: "text-muted-foreground font-courier" }, "○ untested");
+              if (succ === 0)
+                return h("span", { className: "text-amber-500 font-courier" }, "△ no-success");
+              if (cf > 0)
+                return h("span", { className: "text-amber-500 font-courier" }, "△ degraded");
+              return h("span", { className: "text-emerald-500 font-courier" }, "✓ ok");
             }
             return h("div", { className: "mt-2 overflow-x-auto" },
               h("table", { className: "w-full text-xs font-courier" },
@@ -863,7 +876,7 @@
                     h("th", { className: "text-right px-2 py-1" }, "✓"),
                     h("th", { className: "text-right px-2 py-1" }, "✗"),
                     h("th", { className: "text-right px-2 py-1" }, "Cons.fail"),
-                    h("th", { className: "text-left px-2 py-1" }, "Circuit"),
+                    h("th", { className: "text-left px-2 py-1" }, "State"),
                     h("th", { className: "text-left px-2 py-1" }, "Last err"),
                     h("th", { className: "text-right px-2 py-1" }, "Last ok"),
                     h("th", { className: "text-right px-2 py-1" }, "Last fail"),
@@ -961,34 +974,32 @@
                 "deactivates and the Req column is empty for every row.")),
             h("table", { className: "w-full text-sm font-courier" },
               h("thead", null, h("tr", { className: "text-muted-foreground" },
-                h("th", { className: "text-left py-1" }, tx(t, "pool.rank", "#")),
-                h("th", { className: "text-left py-1" }, tx(t, "pool.req", "Req")),
-                h("th", { className: "text-left py-1" }, tx(t, "pool.model", "Model")),
-                h("th", { className: "text-right py-1" }, tx(t, "pool.params", "Params")),
-                h("th", { className: "text-right py-1" }, tx(t, "pool.context", "Context")),
-                h("th", { className: "text-right py-1" }, tx(t, "pool.tools", "Tools")),
-                h("th", { className: "text-right py-1" }, tx(t, "pool.modality", "Modality")),
-                h("th", { className: "text-right py-1" }, tx(t, "pool.price_in", "$/M in")),
-                h("th", { className: "text-right py-1" }, tx(t, "pool.price_out", "$/M out")),
+                h("th", { className: "text-left py-1 pr-3" }, tx(t, "pool.req", "Req")),
+                h("th", { className: "text-left py-1 pr-3" }, tx(t, "pool.model", "Model")),
+                h("th", { className: "text-right py-1 px-3" }, tx(t, "pool.params", "Params")),
+                h("th", { className: "text-right py-1 px-3" }, tx(t, "pool.context", "Context")),
+                h("th", { className: "text-right py-1 px-3" }, tx(t, "pool.tools", "Tools")),
+                h("th", { className: "text-right py-1 px-3" }, tx(t, "pool.modality", "Modality")),
+                h("th", { className: "text-right py-1 px-3" }, tx(t, "pool.price_in", "$/M in")),
+                h("th", { className: "text-right py-1 pl-3" }, tx(t, "pool.price_out", "$/M out")),
               )),
-              h("tbody", null, liveRanked.map(function (c, idx) {
+              h("tbody", null, liveRanked.map(function (c) {
                 const reqPos = orderMap[c.id];
                 const isReq1 = reqPos === 1;
                 return h("tr", {
                   key: c.id,
                   className: isReq1 ? "bg-emerald-500/10" : "",
                 },
-                  h("td", { className: "py-1 text-muted-foreground" }, idx + 1),
                   h("td", {
-                    className: "py-1 " + (reqPos ? "text-emerald-500 font-bold" : "text-muted-foreground"),
+                    className: "py-1 pr-3 " + (reqPos ? "text-emerald-500 font-bold" : "text-muted-foreground"),
                   }, reqPos ? String(reqPos) : ""),
-                  h("td", { className: "py-1" }, c.id),
-                  h("td", { className: "py-1 text-right" }, c.params_display || "—"),
-                  h("td", { className: "py-1 text-right" }, c.context_length),
-                  h("td", { className: "py-1 text-right" }, c.supports_tools ? "✓" : "—"),
-                  h("td", { className: "py-1 text-right" }, c.modality || "—"),
-                  h("td", { className: "py-1 text-right" }, c.prompt_per_million_usd != null ? c.prompt_per_million_usd.toFixed(3) : "—"),
-                  h("td", { className: "py-1 text-right" }, c.completion_per_million_usd != null ? c.completion_per_million_usd.toFixed(3) : "—"),
+                  h("td", { className: "py-1 pr-3" }, c.id),
+                  h("td", { className: "py-1 px-3 text-right" }, c.params_display || "—"),
+                  h("td", { className: "py-1 px-3 text-right" }, c.context_length),
+                  h("td", { className: "py-1 px-3 text-right" }, c.supports_tools ? "✓" : "—"),
+                  h("td", { className: "py-1 px-3 text-right" }, c.modality || "—"),
+                  h("td", { className: "py-1 px-3 text-right" }, c.prompt_per_million_usd != null ? c.prompt_per_million_usd.toFixed(3) : "—"),
+                  h("td", { className: "py-1 pl-3 text-right" }, c.completion_per_million_usd != null ? c.completion_per_million_usd.toFixed(3) : "—"),
                 );
               })),
             ),
