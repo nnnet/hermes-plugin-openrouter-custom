@@ -86,25 +86,51 @@ def _static(
     return _candidate_ids(candidates)[: max(max_count, 1)]
 
 
+def _interleave_main_tail(main: List[str], tail: List[str], max_count: int) -> List[str]:
+    """Cap result at ``max_count`` while guaranteeing at least one tail
+    slot when a tail exists.  Without this rule, the cap silently
+    drops quarantined models when ``len(main) >= max_count`` —
+    defeating the whole point of «push to end, don't exclude»."""
+    max_count = max(max_count, 1)
+    if not tail:
+        return main[:max_count]
+    if not main:
+        return tail[:max_count]
+    # Reserve 1 slot for tail. The very BEST quarantined (first in tail
+    # = highest by ranking among the bad) gets the chance to be tried
+    # last server-side. Any remaining tail entries are appended only if
+    # there's still room.
+    main_slots = max(max_count - 1, 1)
+    out = main[:main_slots] + tail[:1]
+    # Fill any remaining cap with more tail entries.
+    if len(out) < max_count:
+        more = tail[1 : max_count - len(out) + 1]
+        out.extend(more)
+    return out[:max_count]
+
+
 @_register("failover_with_health")
 def _failover_with_health(
     candidates: List[Dict[str, Any]],
     health: Dict[str, Any],
     max_count: int,
 ) -> List[str]:
-    """Rank order minus models with OPEN circuits whose probe time hasn't
-    arrived yet."""
+    """Rank order; models in quarantine (OPEN circuit, cooldown not yet
+    elapsed) move to the TAIL of the list.  They're not excluded — OR
+    will still try them last after the healthy ones fail, because we
+    can't be sure the quarantine state still reflects reality and we
+    don't want to throw away a potentially-recovered top model."""
     now = _h._now()
     models = health.get("models", {})
-    out: List[str] = []
+    main: List[str] = []
+    tail: List[str] = []
     for cid in _candidate_ids(candidates):
         entry = models.get(cid)
         if entry and _h.is_blocked(entry, now):
-            continue
-        out.append(cid)
-        if len(out) >= max_count:
-            break
-    return out
+            tail.append(cid)
+        else:
+            main.append(cid)
+    return _interleave_main_tail(main, tail, max_count)
 
 
 @_register("circuit_breaker")
@@ -113,9 +139,13 @@ def _circuit_breaker(
     health: Dict[str, Any],
     max_count: int,
 ) -> List[str]:
-    """Same as failover_with_health but promotes a model that has just
-    transitioned OPEN→HALF_OPEN to the front of the list so the next
-    request acts as the probe.
+    """Healthy models in ranking order, then the one whose quarantine
+    just elapsed promoted to slot 1 (probe), then quarantined models at
+    the tail.
+
+    Mid-quarantine models are pushed to the END (not dropped) so OR can
+    still try them as a last resort — we never know for sure when the
+    upstream provider recovered.
 
     Note: this function does NOT mutate health. The caller is expected to
     do the half_open transition + record outcome separately.
@@ -124,6 +154,7 @@ def _circuit_breaker(
     models = health.get("models", {})
     half_open_probe: str | None = None
     main: List[str] = []
+    quarantined: List[str] = []
     for cid in _candidate_ids(candidates):
         entry = models.get(cid)
         if not entry:
@@ -133,18 +164,27 @@ def _circuit_breaker(
         if state == _h.CIRCUIT_OPEN:
             next_probe = _h._parse_iso(entry.get("next_probe_iso"))
             if next_probe is None or now >= next_probe:
-                # Probe is due — promote to first slot (one-shot).
+                # Quarantine elapsed — promote to slot 1 as probe.
                 if half_open_probe is None:
                     half_open_probe = cid
                 continue
-            # Still in cooldown, skip.
+            # Still in quarantine — push to tail (NOT skipped).
+            quarantined.append(cid)
             continue
         if state == _h.CIRCUIT_HALF_OPEN:
             if half_open_probe is None:
                 half_open_probe = cid
             continue
         main.append(cid)
-    ordered = ([half_open_probe] if half_open_probe else []) + main
+    # Probe + main, then reserve a tail slot for quarantined just like
+    # failover_with_health. Probe slot consumes one of max_count.
+    probe_list = [half_open_probe] if half_open_probe else []
+    # Don't double-count the probe in main if somehow it ended up there.
+    main_filtered = [m for m in main if m != half_open_probe]
+    quar_filtered = [q for q in quarantined if q != half_open_probe]
+    remaining = max(max_count - len(probe_list), 1)
+    tail_part = _interleave_main_tail(main_filtered, quar_filtered, remaining)
+    ordered = probe_list + tail_part
     # Dedup while preserving order.
     seen: set[str] = set()
     out: List[str] = []

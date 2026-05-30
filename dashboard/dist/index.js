@@ -407,7 +407,7 @@
           h("div", { className: "flex items-center justify-between" },
             h("div", { className: "flex items-center gap-3" },
               h(CardTitle, null, tx(t, "title", "OpenRouter Custom")),
-              h(Badge, { variant: "outline" }, "v0.7.3"),
+              h(Badge, { variant: "outline" }, "v0.7.4"),
             ),
             h("div", { className: "flex items-center gap-2" },
               h(Button, { onClick: refreshNow, disabled: busy },
@@ -779,36 +779,36 @@
           }),
           h("details", { className: "rounded border border-border/60 px-3 py-2 text-xs" },
             h("summary", { className: "cursor-pointer text-muted-foreground select-none" },
-              tx(t, "rotation.help.summary", "How does each mode behave?")),
+              tx(t, "rotation.help.summary", "How each mode behaves")),
             h("div", { className: "mt-2 space-y-2" },
               h("div", null,
                 h("span", { className: "font-courier text-emerald-500" }, "static"),
                 " — ",
                 tx(t, "rotation.help.static",
-                  "Original behaviour. Sends top-N candidates to OR in strict " +
-                  "ranking order. Ignores health.json entirely.")),
+                  "Health is ignored. Top-N candidates by ranking are sent " +
+                  "to OpenRouter as-is.")),
               h("div", null,
                 h("span", { className: "font-courier text-emerald-500" }, "failover_with_health"),
                 " — ",
                 tx(t, "rotation.help.failover_with_health",
-                  "Same ranking but skips any model whose circuit is OPEN " +
-                  "with an unexpired cooldown. Models return automatically " +
-                  "when the cooldown elapses.")),
+                  "Models go by ranking. Those quarantined (after 3 consecutive " +
+                  "errors) are sent LAST in the list — OR tries them only if the " +
+                  "healthy ones fail. When the quarantine timer expires, the " +
+                  "model returns to its ranking slot.")),
               h("div", null,
                 h("span", { className: "font-courier text-emerald-500" }, "circuit_breaker"),
                 " — ",
                 tx(t, "rotation.help.circuit_breaker",
-                  "Adds an explicit HALF_OPEN probe step: when a model's " +
-                  "cooldown ends, it's promoted to slot 1 (one-shot). A " +
-                  "success closes the circuit; a failure re-opens it with " +
-                  "exponential backoff (5m → 10m → 20m → 40m → 80m).")),
+                  "Same as failover_with_health, plus: when a model's quarantine " +
+                  "timer expires it is promoted to slot 1 (one-shot probe). " +
+                  "Success → quarantine cleared. Failure → quarantine extended " +
+                  "with exponential backoff: 5 → 10 → 20 → 40 → 80 minutes.")),
               h("div", null,
                 h("span", { className: "font-courier text-emerald-500" }, "sticky_health_weighted"),
                 " — ",
                 tx(t, "rotation.help.sticky_health_weighted",
-                  "Re-ranks every call: effective_score = rank_score × " +
-                  "success_rate (Beta-smoothed). Failing models drift " +
-                  "downward without ever being binary-blocked.")),
+                  "Re-ranks every call by rank_score × success_rate (Beta-smoothed). " +
+                  "Failing models drift down gradually but are never hard-blocked.")),
             ),
           ),
           health && Object.keys(health).length > 0 && (function () {
@@ -850,9 +850,9 @@
             }
             function stateBadge(e) {
               const s = (e && e.circuit_state) || "closed";
-              if (s === "open")      return h("span", { className: "text-red-500 font-courier" }, "🚫 open");
-              if (s === "half_open") return h("span", { className: "text-amber-500 font-courier" }, "⚠ half");
-              return h("span", { className: "text-emerald-500 font-courier" }, "✓ closed");
+              if (s === "open")      return h("span", { className: "text-red-500 font-courier" }, "🚫 quarantined");
+              if (s === "half_open") return h("span", { className: "text-amber-500 font-courier" }, "⚠ probing");
+              return h("span", { className: "text-emerald-500 font-courier" }, "✓ healthy");
             }
             return h("div", { className: "mt-2 overflow-x-auto" },
               h("table", { className: "w-full text-xs font-courier" },

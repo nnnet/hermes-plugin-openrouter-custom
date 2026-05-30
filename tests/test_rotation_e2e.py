@@ -75,9 +75,10 @@ def test_e2e_circuit_breaker_demotes_then_promotes(tmp_path: pathlib.Path) -> No
     assert entry["backoff_seconds"] == 300  # first ladder rung = 5m
 
     order_2 = r.request_order("circuit_breaker", cands, h.load_health(tmp_path), 4)
-    assert "qwen/qwen3-coder:free" not in order_2
+    # v0.7.4: quarantined model moves to TAIL instead of being skipped.
     assert order_2[0] == "deepseek/deepseek-v4-flash:free"
-    assert len(order_2) == 4  # filler model #5 now takes the empty slot
+    assert order_2[-1] == "qwen/qwen3-coder:free"
+    assert len(order_2) == 4
 
     # ── PHASE 3: cooldown elapsed → probe slot ────────────────────
     fresh = h.load_health(tmp_path)
@@ -114,10 +115,10 @@ def test_e2e_failover_with_health_skips_only_active_cooldowns(tmp_path: pathlib.
     _record_failures(data, "qwen/qwen3-coder:free", n=3)
     h.save_health(tmp_path, data)
 
-    # Inside the cooldown window: the model is gone.
+    # Inside the cooldown window: the model is at the tail.
     order_during = r.request_order("failover_with_health", cands, h.load_health(tmp_path), 4)
-    assert "qwen/qwen3-coder:free" not in order_during
     assert order_during[0] == "deepseek/deepseek-v4-flash:free"
+    assert order_during[-1] == "qwen/qwen3-coder:free"
 
     # Cooldown elapsed (simulate by editing next_probe_iso): the model
     # rejoins at its original rank position.

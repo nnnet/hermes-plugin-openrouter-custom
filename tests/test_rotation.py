@@ -123,15 +123,18 @@ def test_static_caps_at_max_count() -> None:
     assert out == ["a", "b"]
 
 
-def test_failover_with_health_skips_blocked() -> None:
+def test_failover_with_health_moves_quarantined_to_tail() -> None:
+    """Quarantined model (OPEN, cooldown active) is pushed to the END,
+    not excluded. OR can still try it after the healthy ones fail."""
     health = {"models": {"a": _open_circuit_entry(60)}}
     out = r.request_order("failover_with_health", _cand("a", "b", "c"), health, 5)
-    assert out == ["b", "c"]
+    assert out == ["b", "c", "a"]
 
 
 def test_failover_with_health_includes_expired_cooldown() -> None:
     health = {"models": {"a": _open_circuit_entry(-60)}}
     out = r.request_order("failover_with_health", _cand("a", "b", "c"), health, 5)
+    # Cooldown elapsed → no longer blocked → returns to its ranking slot.
     assert out == ["a", "b", "c"]
 
 
@@ -142,10 +145,11 @@ def test_circuit_breaker_promotes_due_probe_to_front() -> None:
     assert out == ["b", "a", "c"]
 
 
-def test_circuit_breaker_skips_active_cooldown() -> None:
+def test_circuit_breaker_moves_active_quarantine_to_tail() -> None:
+    """v0.7.4: quarantined models pushed to tail instead of being skipped."""
     health = {"models": {"a": _open_circuit_entry(600)}}
     out = r.request_order("circuit_breaker", _cand("a", "b", "c"), health, 5)
-    assert out == ["b", "c"]
+    assert out == ["b", "c", "a"]
 
 
 def test_circuit_breaker_handles_half_open() -> None:
