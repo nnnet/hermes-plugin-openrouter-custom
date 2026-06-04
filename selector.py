@@ -26,8 +26,8 @@ def fetch_live_catalog(
     """Pull the live OpenRouter model catalog. Returns raw item dicts.
 
     ``models_url`` overrides the default OpenRouter endpoint — used when
-    the plugin is routed through a local Bifrost gateway (see
-    config_overrides.yaml ``models_url``).
+    the plugin is routed through a local Bifrost gateway (set the
+    ``models_url`` key in ``state/openrouter_custom/config.yaml``).
     """
     headers = {"Accept": "application/json"}
     if api_key:

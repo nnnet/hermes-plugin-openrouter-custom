@@ -113,22 +113,47 @@ def save_alias_sessions(sessions: set[str]) -> None:
         pass
 
 
-def overrides_file() -> Path:
-    """Mutable config overrides file written by the dashboard plugin UI.
+def config_file() -> Path:
+    """Mutable plugin config file — single source of truth.
 
     Lives in HERMES_HOME (rw) because the plugin source directory is
-    bind-mounted read-only inside the container. Anything written here is
-    merged on top of the bundled ``plugin.yaml`` ``config:`` block on
-    every load_config() call.
+    bind-mounted read-only inside the container. ``load_config()`` reads
+    only this file. The bundled ``plugin.yaml`` ``config:`` block is the
+    initial-bootstrap template — copied verbatim into this file the first
+    time the plugin runs.
     """
+    return _state_dir() / "config.yaml"
+
+
+# Legacy overrides path — kept only for one-shot migration. Removed
+# entirely once every deploy has a config.yaml next to it.
+def _legacy_overrides_file() -> Path:
     return _state_dir() / "config_overrides.yaml"
+
+
+def _bundled_defaults() -> dict:
+    """Read the bundled plugin.yaml ``config:`` block (read-only template)."""
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError:  # pragma: no cover — Hermes always has pyyaml
+        return {}
+    try:
+        with open(CONFIG_FILE) as f:
+            raw = yaml.safe_load(f) or {}
+        return raw.get("config") or {}
+    except FileNotFoundError:
+        logger.warning("openrouter_custom: plugin.yaml not found at %s", CONFIG_FILE)
+        return {}
+    except Exception as exc:
+        logger.warning("openrouter_custom: failed to parse plugin.yaml: %s", exc)
+        return {}
 
 
 def _deep_merge(base: dict, overlay: dict) -> dict:
     """Recursively merge ``overlay`` into a shallow copy of ``base``.
 
-    Dict-valued keys merge; scalars / lists overwrite. Used to layer the
-    dashboard-edited overrides on top of the bundled defaults.
+    Dict-valued keys merge; scalars / lists overwrite. Used by the
+    legacy overrides migration path below.
     """
     if not isinstance(overlay, dict):
         return base
@@ -141,19 +166,66 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
     return out
 
 
+def _maybe_migrate_legacy_overrides(target: Path) -> None:
+    """One-shot migration: legacy config_overrides.yaml -> config.yaml.
+
+    Older versions of this plugin stored operator edits in
+    ``config_overrides.yaml`` and merged them on top of the bundled
+    plugin.yaml defaults at every load. The current design treats
+    state/config.yaml as the single source of truth; this helper folds
+    a legacy overrides file into config.yaml exactly once, then deletes
+    it.
+    """
+    if target.exists():
+        return
+    legacy = _legacy_overrides_file()
+    if not legacy.exists():
+        return
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError:  # pragma: no cover
+        return
+    try:
+        with open(legacy) as f:
+            overrides = yaml.safe_load(f) or {}
+    except Exception as exc:
+        logger.warning(
+            "openrouter_custom: legacy overrides at %s could not be parsed "
+            "for migration: %s",
+            legacy, exc,
+        )
+        return
+    merged = _deep_merge(_bundled_defaults(), overrides)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".yaml.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.safe_dump(merged, f, sort_keys=False, allow_unicode=True)
+    tmp.replace(target)
+    try:
+        legacy.unlink()
+    except OSError:
+        pass
+    logger.info(
+        "openrouter_custom: migrated legacy config_overrides.yaml into %s",
+        target,
+    )
+
+
 def load_config() -> dict:
-    """Read defaults from plugin.yaml, merge mutable overrides on top.
+    """Read the plugin's mutable config from state/openrouter_custom/config.yaml.
 
-    Called fresh on every cron tick and every session start so changes
-    written via the dashboard UI (or directly to the overrides file)
-    apply at the next tick without a gateway restart.
+    Called fresh on every cron tick, every session start, and every
+    outbound request (via ``build_api_kwargs_extras``) so dashboard /
+    direct edits apply without a gateway restart.
 
-    Post-merge, the ``only_free`` shortcut is expanded into the granular
+    Bootstrap: if config.yaml does not exist yet, it is created from the
+    bundled plugin.yaml ``config:`` block. After that the operator owns
+    the file outright — the plugin never overwrites it on its own.
+
+    Post-load, the ``only_free`` shortcut is expanded into the granular
     price filter: ``only_free: true`` forces both ``filters.price.prompt_max``
     and ``filters.price.completion_max`` to ``0`` so refresh.py picks only
-    zero-cost OpenRouter models. ``only_free: false`` is a no-op (operator
-    keeps whatever explicit price caps they set). Default is ``true`` so a
-    fresh install picks free-tier models without extra config.
+    zero-cost OpenRouter models. Default is ``true``.
     """
     try:
         import yaml  # type: ignore[import-untyped]
@@ -161,59 +233,79 @@ def load_config() -> dict:
         logger.warning("openrouter_custom: PyYAML missing, using empty config")
         return {}
 
-    defaults: dict = {}
-    try:
-        with open(CONFIG_FILE) as f:
-            raw = yaml.safe_load(f) or {}
-        defaults = raw.get("config") or {}
-    except FileNotFoundError:
-        logger.warning("openrouter_custom: plugin.yaml not found at %s", CONFIG_FILE)
-    except Exception as exc:
-        logger.warning("openrouter_custom: failed to parse plugin.yaml: %s", exc)
+    target = config_file()
+    _maybe_migrate_legacy_overrides(target)
 
-    overrides: dict = {}
-    overlay_path = overrides_file()
-    if overlay_path.exists():
+    if not target.exists():
+        # First-run bootstrap: seed config.yaml from the bundled template.
+        defaults = _bundled_defaults()
         try:
-            with open(overlay_path) as f:
-                overrides = yaml.safe_load(f) or {}
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(".yaml.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                yaml.safe_dump(defaults, f, sort_keys=False, allow_unicode=True)
+            tmp.replace(target)
+            logger.info(
+                "openrouter_custom: seeded %s from bundled plugin.yaml defaults",
+                target,
+            )
         except Exception as exc:
             logger.warning(
-                "openrouter_custom: failed to parse overrides at %s: %s",
-                overlay_path, exc,
+                "openrouter_custom: failed to seed %s: %s — using in-memory "
+                "defaults for this call only",
+                target, exc,
             )
-
-    merged = _deep_merge(defaults, overrides)
+            cfg = dict(defaults)
+        else:
+            cfg = dict(defaults)
+    else:
+        try:
+            with open(target) as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception as exc:
+            logger.warning(
+                "openrouter_custom: failed to parse %s: %s — using bundled "
+                "defaults for this call only",
+                target, exc,
+            )
+            cfg = dict(_bundled_defaults())
 
     # ``only_free`` shortcut — default True, can be turned off explicitly.
-    only_free = merged.get("only_free")
+    only_free = cfg.get("only_free")
     if only_free is None:
         only_free = True
     if only_free:
-        price = merged.setdefault("filters", {}).setdefault("price", {})
+        price = cfg.setdefault("filters", {}).setdefault("price", {})
         price["prompt_max"] = 0
         price["completion_max"] = 0
 
-    return merged
+    return cfg
 
 
-def save_overrides(new_config: dict) -> None:
-    """Persist UI-edited config to the mutable overrides file.
+def save_config(new_config: dict) -> None:
+    """Persist UI-edited config to the mutable config file (full snapshot).
 
-    Only the keys present in ``new_config`` are written — load_config()
-    will merge them on top of the bundled defaults at next read.
+    Unlike the previous overrides-based design, this writes the COMPLETE
+    config — load_config() no longer merges with plugin.yaml defaults at
+    read time. The bundled plugin.yaml is only consulted by the
+    first-run bootstrap inside ``load_config``.
     """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("PyYAML required to save overrides") from exc
+        raise RuntimeError("PyYAML required to save config") from exc
 
-    target = overrides_file()
+    target = config_file()
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".yaml.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         yaml.safe_dump(new_config, f, sort_keys=False, allow_unicode=True)
     tmp.replace(target)
+
+
+# Back-compat alias — kept so any external caller still importing
+# ``save_overrides`` keeps working until they migrate to ``save_config``.
+save_overrides = save_config
 
 
 def load_state() -> dict:

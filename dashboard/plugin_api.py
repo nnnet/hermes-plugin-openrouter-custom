@@ -14,8 +14,8 @@ Endpoints
 
 Concurrency
 -----------
-``PUT /config`` writes to a single overrides file using a tmp+rename
-swap (see ``save_overrides``). On a multi-replica deploy the file would
+``PUT /config`` writes to a single config file using a tmp+rename
+swap (see ``save_config``). On a multi-replica deploy the file would
 need a lock; we don't have one here because the dashboard is a single
 container.
 """
@@ -66,12 +66,17 @@ def _read_defaults() -> dict:
     return raw.get("config") or {}
 
 
-def _read_overrides() -> dict:
+def _read_state_config() -> dict:
+    """Read the mutable plugin config file as-is (raw, no defaults merge).
+
+    Returns empty dict when the file does not exist yet (i.e. before the
+    first load_config() call has bootstrapped it from plugin.yaml).
+    """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:
         return {}
-    p = _pkg.overrides_file()
+    p = _pkg.config_file()
     if not p.exists():
         return {}
     try:
@@ -128,25 +133,30 @@ class _ConfigPayload(BaseModel):
 
 @router.get("/config")
 async def get_effective_config() -> dict:
-    """Return defaults merged with overrides — what the plugin actually uses."""
+    """Return the mutable config — what the plugin actually uses.
+
+    ``defaults`` exposes the bundled plugin.yaml ``config:`` block for
+    diffing in the UI; ``state_config`` is the raw on-disk file before
+    the ``only_free`` shortcut expansion.
+    """
     return {
         "config": _pkg.load_config(),
         "defaults": _read_defaults(),
-        "overrides": _read_overrides(),
-        "config_file": str(_pkg.CONFIG_FILE),
-        "overrides_file": str(_pkg.overrides_file()),
+        "state_config": _read_state_config(),
+        "bundled_template": str(_pkg.CONFIG_FILE),
+        "config_file": str(_pkg.config_file()),
     }
 
 
 @router.put("/config")
-async def put_overrides(body: _ConfigPayload) -> dict:
-    """Replace the overrides file with the supplied config block."""
+async def put_config(body: _ConfigPayload) -> dict:
+    """Replace the mutable config file with the supplied config block."""
     try:
-        _pkg.save_overrides(body.config)
+        _pkg.save_config(body.config)
     except Exception as exc:
-        logger.exception("openrouter_custom: save_overrides failed")
+        logger.exception("openrouter_custom: save_config failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"ok": True, "overrides_file": str(_pkg.overrides_file())}
+    return {"ok": True, "config_file": str(_pkg.config_file())}
 
 
 @router.post("/refresh")
@@ -284,14 +294,11 @@ async def set_health_mode(payload: _HealthModePayload) -> dict:
     mode = str(payload.mode or "").strip().lower()
     if mode not in {"observe_outcome", "observe_prob"}:
         raise HTTPException(status_code=400, detail="mode must be observe_outcome or observe_prob")
-    ofile = _pkg.overrides_file()
+    # Use load_config() so the file is bootstrapped on first call and any
+    # legacy config_overrides.yaml is migrated before we mutate.
+    current = _pkg.load_config()
+    ofile = _pkg.config_file()
     ofile.parent.mkdir(parents=True, exist_ok=True)
-    current: dict = {}
-    if ofile.exists():
-        try:
-            current = _yaml.safe_load(ofile.read_text()) or {}
-        except Exception:
-            current = {}
     current["health_mode"] = mode
     # Drop the now-removed probe_enabled key if it leaked into an older
     # overrides file.

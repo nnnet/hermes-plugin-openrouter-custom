@@ -39,7 +39,7 @@ instead of ride the alias.
 
 Lives in `plugin.yaml`, hot-reloaded on every cron tick and every
 session start — no gateway restart required. Operator overrides go to
-`state/openrouter_custom/config_overrides.yaml` (writable via dashboard
+`state/openrouter_custom/config.yaml` (writable via dashboard
 or directly).
 
 ```yaml
@@ -230,7 +230,7 @@ Under `$HERMES_HOME/state/openrouter_custom/` (typically
 - `state.json` — `candidates_top` ranked list, `real_model_id`, refresh metadata.
 - `health.json` — per-model counters and circuit state.
 - `alias_sessions.json` — persistent set of session ids that came through the alias.
-- `config_overrides.yaml` — operator-written deltas on top of `plugin.yaml`.
+- `config.yaml` — operator-owned plugin config (seeded from `plugin.yaml` on first run).
 
 ## How it plugs in
 
