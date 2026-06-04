@@ -18,12 +18,22 @@ logger = logging.getLogger(__name__)
 OR_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 
-def fetch_live_catalog(api_key: str | None = None, timeout: float = 8.0) -> list[dict]:
-    """Pull the live OpenRouter model catalog. Returns raw item dicts."""
+def fetch_live_catalog(
+    api_key: str | None = None,
+    timeout: float = 8.0,
+    models_url: str | None = None,
+) -> list[dict]:
+    """Pull the live OpenRouter model catalog. Returns raw item dicts.
+
+    ``models_url`` overrides the default OpenRouter endpoint — used when
+    the plugin is routed through a local Bifrost gateway (see
+    config_overrides.yaml ``models_url``).
+    """
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(OR_MODELS_URL, headers=headers)
+    url = (models_url or OR_MODELS_URL).strip()
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         payload = json.loads(resp.read().decode())
     data = payload.get("data", [])
@@ -209,8 +219,12 @@ def pick_best(
     on_failure = (refresh_cfg.get("on_failure") or "keep_last").strip().lower()
     fallback_id = refresh_cfg.get("fallback_static_id") or ""
 
+    # Catalog endpoint override (e.g. through a local Bifrost gateway).
+    # Falls back to the OpenRouter default when omitted.
+    models_url = (config.get("models_url") or "").strip() or None
+
     try:
-        items = fetch_live_catalog(api_key=api_key)
+        items = fetch_live_catalog(api_key=api_key, models_url=models_url)
     except Exception as exc:
         logger.warning("openrouter_custom.pick_best: catalog fetch failed: %s", exc)
         return _apply_failure_strategy(on_failure, fallback_id, last_state, reason=str(exc))

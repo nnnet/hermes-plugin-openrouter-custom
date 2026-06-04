@@ -329,6 +329,64 @@ if ProviderProfile is not None:
             self._mark_alias_session(_context.get("session_id"))
             return real
 
+        # ── Mid-session pseudo-alias substitution ─────────────────────────
+        # Hermes calls ``build_api_kwargs_extras`` from the chat-completions
+        # transport on EVERY outbound request (see
+        # /opt/hermes/agent/transports/chat_completions.py around line 496).
+        # The returned ``top_level_kwargs`` dict is merged into ``api_kwargs``
+        # via ``api_kwargs.update(top_level_from_profile)`` — meaning a
+        # ``{"model": ...}`` entry overrides whatever ``agent.model`` resolved
+        # to. We exploit that to swap the pseudo alias for the live real id
+        # without touching any other provider's request flow.
+        #
+        # ``resolve_runtime_model`` (above) has been a no-op in current
+        # Hermes for a while because no caller invokes it. Doing the
+        # substitution here keeps the swap inside the documented profile
+        # contract — no monkey-patching of openai SDK, no override of
+        # Hermes core.
+        def build_api_kwargs_extras(  # type: ignore[override]
+            self,
+            *,
+            reasoning_config: object = None,
+            **context: object,
+        ) -> tuple[dict[str, object], dict[str, object]]:
+            model = context.get("model")
+            session_id = context.get("session_id")
+            top_level: dict[str, object] = {}
+            if isinstance(model, str):
+                cfg = load_config()
+                alias = (cfg.get("pseudo_model_alias") or "best-free").strip()
+                if model == alias:
+                    state = load_state()
+                    real = str(state.get("real_model_id") or "").strip()
+                    if real:
+                        # Bifrost OpenAI-shape passthrough only routes to
+                        # the openrouter upstream when the model carries
+                        # the ``openrouter/`` provider prefix.
+                        if not real.startswith("openrouter/"):
+                            real = f"openrouter/{real}"
+                        top_level["model"] = real
+                        # Mark the session so build_extra_body below can
+                        # opt into rotation when configured.
+                        self._mark_alias_session(session_id)
+                        logger.info(
+                            "openrouter_custom: alias %r -> %r (transport "
+                            "build_api_kwargs_extras)", alias, real,
+                        )
+                    else:
+                        logger.warning(
+                            "openrouter_custom: alias %r requested but "
+                            "state.json has no real_model_id — request "
+                            "will fail upstream; run refresh.py",
+                            alias,
+                        )
+                else:
+                    # Operator picked a concrete id — clear any stale
+                    # alias-session marker so build_extra_body's rotation
+                    # stays off for the remainder of the session.
+                    self._unmark_alias_session(session_id)
+            return {}, top_level
+
         def build_extra_body(  # type: ignore[override]
             self, *, session_id: str | None = None, **context: object
         ) -> dict[str, object]:
@@ -499,6 +557,19 @@ if ProviderProfile is not None:
     _cfg_for_profile = load_config()
     _pseudo_alias = (_cfg_for_profile.get("pseudo_model_alias") or "best-free").strip()
 
+    # Allow the operator to redirect traffic — both inference and the
+    # catalog refresh — through a local Bifrost gateway by overriding
+    # base_url / models_url in config_overrides.yaml. Default keeps the
+    # direct OpenRouter endpoint.
+    _base_url = (
+        _cfg_for_profile.get("base_url")
+        or "https://openrouter.ai/api/v1"
+    ).strip()
+    _models_url = (
+        _cfg_for_profile.get("models_url")
+        or f"{_base_url.rstrip('/')}/models"
+    ).strip()
+
     openrouter_custom = OpenRouterCustomProfile(
         name="openrouter_custom",
         display_name="OpenRouter Custom",
@@ -508,9 +579,14 @@ if ProviderProfile is not None:
         ),
         aliases=("or-custom",),
         api_mode="chat_completions",
-        env_vars=("OPENROUTER_API_KEY",),
-        base_url="https://openrouter.ai/api/v1",
-        models_url="https://openrouter.ai/api/v1/models",
+        # No env-var auth required: when traffic is routed through the
+        # local Bifrost gateway, Bifrost itself injects the upstream
+        # key. The default direct mode also tolerates a missing key for
+        # the free-tier endpoint, so listing the env var here would
+        # only mark the provider 'unauthenticated' in the picker.
+        env_vars=(),
+        base_url=_base_url,
+        models_url=_models_url,
         auth_type="api_key",
         default_aux_model=_pseudo_alias,
         fallback_models=(_pseudo_alias,),
@@ -530,9 +606,10 @@ def register(ctx: Any) -> None:  # pragma: no cover — exercised by Hermes
     """Hermes plugin entry point.
 
     All routing logic lives on the ProviderProfile subclass declared
-    above (see ``resolve_runtime_model`` and ``fetch_models``).  The
-    module body already calls ``register_provider`` at import time, so
-    this function is intentionally a no-op — it exists only because the
-    Hermes plugin manager requires every plugin to expose ``register``.
+    above. Pseudo-alias substitution is wired through
+    ``build_api_kwargs_extras`` — Hermes' chat-completions transport
+    merges the returned ``top_level`` dict into ``api_kwargs`` on every
+    outbound request, so returning ``{"model": "<real id>"}`` swaps the
+    alias without touching Hermes core or the openai SDK.
     """
     return None
