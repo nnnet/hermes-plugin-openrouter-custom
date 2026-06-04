@@ -1,0 +1,30 @@
+tests/test_rotation.py
+  s_e5369d415d379b::t_48e0223bb76459 141-146,149-150,156-159,164
+plugin.yaml
+  s_e5369d415d379b::t_201bff84ae5460 3
+tests/test_rotation_e2e.py
+  s_e5369d415d379b::t_884bd86cc7ee3d 83,92-95
+dashboard/manifest.json
+  s_e5369d415d379b::t_a20991b878e934 6
+rotation.py
+  s_e5369d415d379b::t_15ecb215bfc5de 142-155,167,169-171
+dashboard/dist/index.js
+  s_e5369d415d379b::t_c67a86d19fc64b 802-807
+  s_e5369d415d379b::t_f06e0b9aa29b34 410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bbff8222ce887f8a4f6cf96d3760ea526b9ef1b7",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}

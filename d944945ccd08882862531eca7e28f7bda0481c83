@@ -1,0 +1,47 @@
+dashboard/dist/index.js
+  s_e5369d415d379b::t_dce06a1170f6ae 345-360
+  s_e5369d415d379b::t_41309b6aec961e 738-751,754
+  s_e5369d415d379b::t_ee060d3909201a 976,979,985
+  s_e5369d415d379b::t_3437ccce306b9a 431-438
+  s_e5369d415d379b::t_57d0c09bb22b02 955-961
+  s_e5369d415d379b::t_93e8e24d70a047 410
+  s_e5369d415d379b::t_e4992bb63adfc3 211-216,222
+  s_e5369d415d379b::t_c37a332168e884 201
+__init__.py
+  s_e5369d415d379b::t_a5df4ba95ea46a 62-88,92-93,98-103
+  s_e5369d415d379b::t_3962c2cf375da1 89-91,94-97
+  s_e5369d415d379b::t_ef7156a1bdd0f7 227-237,242-248,253
+  s_e5369d415d379b::t_336c094d72d636 311-318
+tests/test_extra_body.py
+  s_e5369d415d379b::t_a017d9e8fb7fcb 193-197,201-203,214-236
+dashboard/manifest.json
+  s_e5369d415d379b::t_338c27c1efb82e 6
+tests/test_rotation_e2e.py
+  s_e5369d415d379b::t_065b11f6066046 219-249
+plugin.yaml
+  s_e5369d415d379b::t_27b8d94796ff33 93-99
+  s_e5369d415d379b::t_1954b05d807577 3
+dashboard/plugin_api.py
+  s_e5369d415d379b::t_8610a8f71dee33 243-275
+probe.py
+  s_e5369d415d379b::t_d503825bef945a 25,28
+  s_e5369d415d379b::t_0d6636fa032936 111-117
+  s_e5369d415d379b::t_8d7772238c8e5c 166
+  s_e5369d415d379b::t_1b8c9876dc79e9 177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d944945ccd08882862531eca7e28f7bda0481c83",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}

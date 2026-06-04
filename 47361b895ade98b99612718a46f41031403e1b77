@@ -1,0 +1,24 @@
+plugin.yaml
+  s_e5369d415d379b::t_7d11558e976a3f 3
+dashboard/manifest.json
+  s_e5369d415d379b::t_f6576dfe0574a8 6
+dashboard/dist/index.js
+  s_e5369d415d379b::t_a72a6516292248 410
+  s_e5369d415d379b::t_d90a5c1bfa4693 826-836
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "47361b895ade98b99612718a46f41031403e1b77",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}

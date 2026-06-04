@@ -1,0 +1,30 @@
+dashboard/manifest.json
+  s_e5369d415d379b::t_97f968854a7461 6
+plugin.yaml
+  s_e5369d415d379b::t_f2661035768a1d 58
+  s_e5369d415d379b::t_cd68fb9e527d03 91
+  s_e5369d415d379b::t_fdb80a8181d28d 3
+dashboard/dist/index.js
+  s_e5369d415d379b::t_9d171e9c81b605 770-781,787-792,798-804,808,819,825-827
+  s_e5369d415d379b::t_aa65e47330c1c5 324
+README.md
+  s_e5369d415d379b::t_5d7fd343870736 56,58
+dashboard/plugin_api.py
+  s_e5369d415d379b::t_70b23a9c6574d6 91,94-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9f11c4a1d0a06391d7f5cbc42de52f113b831e63",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}

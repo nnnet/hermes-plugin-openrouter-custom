@@ -1,0 +1,23 @@
+dashboard/manifest.json
+  s_e5369d415d379b::t_e3f9e597735d03 6
+dashboard/dist/index.js
+  s_e5369d415d379b::t_927705eb782c11 6-10,27-51,143,191-194,204-206,215-216,221,225,240-241,244-249,258,262-263,266,270,278,281,284-285,291,294,298-299,302,308,312-313,316,322,327,333,336-337,343,346-347,355,358,365,368-369,377,380,384-385,388,394,399,408,412-417,419
+plugin.yaml
+  s_e5369d415d379b::t_152086e4a9441b 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "581490aed1ea4ca68482150f3473136e83a35819",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}

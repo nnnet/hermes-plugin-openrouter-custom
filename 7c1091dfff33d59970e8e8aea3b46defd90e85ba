@@ -1,0 +1,25 @@
+dashboard/dist/index.js
+  s_e5369d415d379b::t_83feb67f7c121f 410
+dashboard/plugin_api.py
+  s_e5369d415d379b::t_002c217e515971 278-282,288-292,294
+plugin.yaml
+  s_e5369d415d379b::t_840ca4f7bc5702 3
+dashboard/manifest.json
+  s_e5369d415d379b::t_9a7c1e04783187 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7c1091dfff33d59970e8e8aea3b46defd90e85ba",
+  "prompts": {},
+  "sessions": {
+    "s_e5369d415d379b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9b040558-739b-4a21-810b-53eec3b51a99",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "nnnet <lethanhmai14153@gmail.com>"
+    }
+  }
+}
