@@ -308,6 +308,146 @@ def save_config(new_config: dict) -> None:
 save_overrides = save_config
 
 
+# ── Hermes picker integration ──────────────────────────────────────────────
+# The Hermes ``/model`` picker resolves ``--provider openrouter_custom``
+# through the user-level ``providers:`` block in ``$HERMES_HOME/config.yaml``,
+# not through this plugin's ProviderProfile.fetch_models override. Since
+# ``discover_models: false`` keeps the picker pinned to the static
+# ``models:`` array, we keep that array in sync with the live candidate
+# pool by rewriting it from refresh.py after every cron tick.
+#
+# Output shape:  ``[best-free, *("openrouter/<id>" for id in candidates_top)]``
+# Capped at 9 entries so the Telegram picker fits a single page.
+
+
+def _hermes_config_yaml() -> Path:
+    """Return the path to the active Hermes config.yaml.
+
+    Honours HERMES_HOME (Hermes' own canonical env, defaults to
+    /opt/data inside the container). The plugin runs under the same
+    process tree as the gateway, so HERMES_HOME is always populated.
+    """
+    base = os.environ.get("HERMES_HOME", "/opt/data")
+    return Path(base) / "config.yaml"
+
+
+def sync_hermes_picker_models(*, max_entries: int = 9) -> bool:
+    """Rewrite ``providers.openrouter_custom.models:`` in Hermes config.yaml.
+
+    Reads the live ``candidates_top`` from state.json, prepends the
+    pseudo alias, and writes the result into the operator's
+    ``$HERMES_HOME/config.yaml``. Hermes auto-reloads config.yaml by
+    mtime, so the next ``/model`` open shows the fresh list with no
+    restart needed.
+
+    Returns True when the file was changed, False when already in sync
+    or when the openrouter_custom block is missing. Never raises — a
+    sync failure must not break the refresh cron.
+    """
+    config_path = _hermes_config_yaml()
+    try:
+        text = config_path.read_text()
+    except FileNotFoundError:
+        logger.warning(
+            "openrouter_custom: %s not found — skipping picker sync",
+            config_path,
+        )
+        return False
+    except OSError as exc:
+        logger.warning(
+            "openrouter_custom: could not read %s for picker sync: %s",
+            config_path, exc,
+        )
+        return False
+
+    cfg = load_config()
+    alias = (cfg.get("pseudo_model_alias") or "best-free").strip() or "best-free"
+    state = load_state()
+    candidates = state.get("candidates_top") or []
+
+    seen = {alias}
+    new_models: list[str] = [alias]
+    for entry in candidates:
+        mid = str(entry.get("id") or "").strip()
+        if not mid:
+            continue
+        prefixed = mid if mid.startswith("openrouter/") else f"openrouter/{mid}"
+        if prefixed in seen:
+            continue
+        new_models.append(prefixed)
+        seen.add(prefixed)
+        if len(new_models) >= max_entries:
+            break
+
+    block_indent = "  "
+    block_header = f"{block_indent}openrouter_custom:"
+    inner_indent = block_indent + "  "
+    models_header = f"{inner_indent}models:"
+    item_prefix = inner_indent + "- "
+
+    lines = text.splitlines()
+    try:
+        block_start = next(
+            i for i, line in enumerate(lines) if line.rstrip() == block_header
+        )
+    except StopIteration:
+        logger.warning(
+            "openrouter_custom: %s has no 'openrouter_custom:' provider "
+            "block — skipping picker sync",
+            config_path,
+        )
+        return False
+
+    block_end = len(lines)
+    models_line = -1
+    for i in range(block_start + 1, len(lines)):
+        line = lines[i]
+        if line.startswith(block_indent) and not line.startswith(inner_indent):
+            block_end = i
+            break
+        if line == models_header or line.startswith(models_header + " "):
+            models_line = i
+            break
+
+    if models_line == -1:
+        logger.warning(
+            "openrouter_custom: 'models:' key not found inside the "
+            "openrouter_custom block — skipping picker sync",
+        )
+        return False
+
+    list_end = models_line + 1
+    while list_end < block_end:
+        line = lines[list_end]
+        if line.startswith(item_prefix) or line.strip() == "":
+            list_end += 1
+            continue
+        break
+
+    new_list_lines = [f"{item_prefix}{mid}" for mid in new_models]
+    rebuilt = lines[: models_line + 1] + new_list_lines + lines[list_end:]
+    if rebuilt == lines:
+        return False
+
+    try:
+        tmp = config_path.with_suffix(".yaml.tmp")
+        tmp.write_text("\n".join(rebuilt) + "\n")
+        tmp.replace(config_path)
+    except OSError as exc:
+        logger.warning(
+            "openrouter_custom: could not write %s for picker sync: %s",
+            config_path, exc,
+        )
+        return False
+
+    logger.info(
+        "openrouter_custom: synced %d picker entries to %s "
+        "(alias=%r, %d candidates from state.json)",
+        len(new_models), config_path, alias, len(candidates),
+    )
+    return True
+
+
 def load_state() -> dict:
     try:
         with open(state_file()) as f:

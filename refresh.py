@@ -25,12 +25,24 @@ if str(_self_dir.parent) not in sys.path:
     sys.path.insert(0, str(_self_dir.parent))
 
 try:
-    from openrouter_custom import load_config, load_state, save_state, state_file
+    from openrouter_custom import (
+        load_config,
+        load_state,
+        save_state,
+        state_file,
+        sync_hermes_picker_models,
+    )
     from openrouter_custom.selector import pick_best
 except ImportError:
     # Fallback for when the plugin dir is not a package on sys.path.
     sys.path.insert(0, str(_self_dir))
-    from __init__ import load_config, load_state, save_state, state_file  # type: ignore[no-redef]
+    from __init__ import (  # type: ignore[no-redef]
+        load_config,
+        load_state,
+        save_state,
+        state_file,
+        sync_hermes_picker_models,
+    )
     from selector import pick_best  # type: ignore[no-redef]
 
 
@@ -71,6 +83,15 @@ def main() -> int:
         state.get("real_model_id"),
         state.get("candidate_count"),
     )
+
+    # Keep the Hermes /model picker in sync with the fresh candidate
+    # pool. Failure here must not poison the cron exit code — the
+    # refresh itself succeeded.
+    try:
+        sync_hermes_picker_models()
+    except Exception:
+        log.exception("openrouter_custom: sync_hermes_picker_models failed")
+
     return 0 if state.get("real_model_id") else 3
 
 
