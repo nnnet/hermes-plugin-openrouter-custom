@@ -147,6 +147,13 @@ def load_config() -> dict:
     Called fresh on every cron tick and every session start so changes
     written via the dashboard UI (or directly to the overrides file)
     apply at the next tick without a gateway restart.
+
+    Post-merge, the ``only_free`` shortcut is expanded into the granular
+    price filter: ``only_free: true`` forces both ``filters.price.prompt_max``
+    and ``filters.price.completion_max`` to ``0`` so refresh.py picks only
+    zero-cost OpenRouter models. ``only_free: false`` is a no-op (operator
+    keeps whatever explicit price caps they set). Default is ``true`` so a
+    fresh install picks free-tier models without extra config.
     """
     try:
         import yaml  # type: ignore[import-untyped]
@@ -176,7 +183,18 @@ def load_config() -> dict:
                 overlay_path, exc,
             )
 
-    return _deep_merge(defaults, overrides)
+    merged = _deep_merge(defaults, overrides)
+
+    # ``only_free`` shortcut — default True, can be turned off explicitly.
+    only_free = merged.get("only_free")
+    if only_free is None:
+        only_free = True
+    if only_free:
+        price = merged.setdefault("filters", {}).setdefault("price", {})
+        price["prompt_max"] = 0
+        price["completion_max"] = 0
+
+    return merged
 
 
 def save_overrides(new_config: dict) -> None:
